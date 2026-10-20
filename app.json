@@ -1,13 +1,17 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "安静日记",
+    "slug": "quiet-journal",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "app.quietjournal.ios",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "按住红点说话时，用麦克风录下你的声音。"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -16,10 +20,30 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "app.quietjournal"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-image",
+      "expo-font",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "按住红点说话时，用麦克风录下你的声音。"
+        }
+      ],
+      "expo-asset",
+      "expo-status-bar",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "选照片放进今天的日记。",
+          "cameraPermission": false
+        }
+      ]
+    ]
   }
 }
