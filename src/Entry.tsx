@@ -5,9 +5,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PHOTO } from './images';
-import { Pic, Said } from './session';
+import { Pic } from './session';
 import { F, SZ } from './theme';
-import { Icon, Meta, Panel, Round, s as us, useFace, useLang, useS, useT } from './ui';
+import { Icon, Panel, Round, s as us, useFace, useLang, useS, useT } from './ui';
 
 const src = (p: Pic) => (p.uri ? { uri: p.uri } : p.asset);
 
@@ -47,9 +47,7 @@ function Three({ pics }: { pics: Pic[] }) {
   );
 }
 
-export function Entry({ open, onClose, onArchive, voiceUri, photos, said }: {
-  open: boolean; onClose: () => void; onArchive: () => void; voiceUri: string | null; photos: Pic[]; said: Said[];
-}) {
+export function Entry({ open, onClose, onArchive, voiceUri }: { open: boolean; onClose: () => void; onArchive: () => void; voiceUri: string | null }) {
   const t = useT();
   const S = useS();
   const face = useFace();
@@ -57,7 +55,6 @@ export function Entry({ open, onClose, onArchive, voiceUri, photos, said }: {
   const ins = useSafeAreaInsets();
   const [q, setQ] = useState('');
   const [kb, setKb] = useState(0);
-  const [fold, setFold] = useState(false);
   const player = useAudioPlayer(voiceUri ?? undefined);
   const status = useAudioPlayerStatus(player);
 
@@ -74,9 +71,7 @@ export function Entry({ open, onClose, onArchive, voiceUri, photos, said }: {
 
   const tx = [zh ? st.tx : st.txEn, { color: t.ink, fontFamily: face.body }];
   const sample: Pic[] = [PHOTO.cafe, PHOTO.latte, PHOTO.causeway, PHOTO.sunset, PHOTO.osmanthus, PHOTO.noodles, PHOTO.lanterns, PHOTO.hotpot].map((a) => ({ asset: a }));
-  const nPics = photos.length || 12;
-  const cover = photos[0] || { asset: PHOTO.sunset };
-  const tagOf = (idx: number[]) => (idx.length > 1 ? `${idx[0] + 1}–${idx[idx.length - 1] + 1}` : String(idx[0] + 1));
+  const cover = { asset: PHOTO.sunset };
 
   return (
     <Panel open={open} onBack={onClose}
@@ -100,7 +95,6 @@ export function Entry({ open, onClose, onArchive, voiceUri, photos, said }: {
           <Prop icon="cal" k={S.pDate} v={S.date} />
           <Prop icon="pin" k={S.pPlace} v={S.place} />
           <Prop icon="mic" k={S.pSaid} v={S.voiceLen} />
-          <Prop icon="photo" k={S.pPhotos} v={S.nPhotos(nPics, 0)} />
         </View>
 
         {voiceUri ? (
@@ -110,25 +104,9 @@ export function Entry({ open, onClose, onArchive, voiceUri, photos, said }: {
           </Pressable>
         ) : null}
 
-        {/* what was said just now, newest first */}
-        {said.slice().reverse().map((x, i) => x.kind === 'talk' ? (
-          <View key={'s' + i} style={st.block}><Meta style={{ marginBottom: 4 }}>{S.justNow}</Meta><Text style={tx}>{x.text}</Text></View>
-        ) : (
-          <View key={'s' + i} style={st.block}>
-            <Meta style={{ marginBottom: 6 }}>{S.justNow}</Meta>
-            {x.parts.map((p, j) => (
-              <View key={j} style={{ gap: 10, marginBottom: 14 }}>
-                {p.unit.idx.length > 1 ? <Group pics={p.unit.idx.map((k) => photos[k]).filter(Boolean)} tag={tagOf(p.unit.idx)} />
-                  : photos[p.unit.idx[0]] ? <Image source={src(photos[p.unit.idx[0]])} contentFit="cover" style={st.one} /> : null}
-                <Text style={tx}>{p.text}</Text>
-              </View>
-            ))}
-          </View>
-        ))}
-
         {/* the sample day */}
         <View style={st.block}>
-          <Group pics={sample.slice(0, 4)} tag="3–6" />
+          <Group pics={sample.slice(0, 4)} />
           <Text style={tx}>{S.t1}</Text>
         </View>
         <View style={st.block}>
@@ -137,17 +115,6 @@ export function Entry({ open, onClose, onArchive, voiceUri, photos, said }: {
         </View>
         <Text style={[tx, { color: t.mut }]}>{S.t3}</Text>
 
-        <Pressable onPress={() => setFold(!fold)} style={st.fold}>
-          <Icon name={fold ? 'down' : 'chev'} color={t.mut} size={14} />
-          <Text style={{ fontSize: 14, color: t.ink }}>{S.foldMore(5)}</Text>
-          <View style={st.mini}>{sample.slice(4, 8).map((p, i) => <Image key={i} source={src(p)} contentFit="cover" style={[st.miniI, { borderColor: t.panel }]} />)}</View>
-        </Pressable>
-        {fold ? <View style={st.foldGrid}>{sample.slice(3, 8).map((p, i) => <Image key={i} source={src(p)} contentFit="cover" style={st.foldI} />)}</View> : null}
-
-        <View style={[st.callout, { backgroundColor: t.b }]}>
-          <Text style={{ fontSize: 15 }}>✦</Text>
-          <Text style={{ flex: 1, fontSize: 13.5, lineHeight: 21, color: t.mut }}>{S.callout}</Text>
-        </View>
       </ScrollView>
       {/* while the keyboard is up, a tap anywhere on the page puts it away */}
       {kb > 0 && <Pressable style={StyleSheet.absoluteFill} onPress={Keyboard.dismiss} accessibilityLabel={S.back} />}

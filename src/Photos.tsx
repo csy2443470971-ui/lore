@@ -23,7 +23,7 @@ function Screen({ open, children }: { open: boolean; children: React.ReactNode }
 }
 
 /* a group shown as one tile: up to four photos in a little mosaic */
-function Mosaic({ pics, w, h, r }: { pics: Pic[]; w: number; h: number; r: number }) {
+export function Mosaic({ pics, w, h, r }: { pics: Pic[]; w: number; h: number; r: number }) {
   const t = useT();
   const four = pics.length >= 4, list = pics.slice(0, four ? 4 : 2);
   return (
@@ -33,7 +33,7 @@ function Mosaic({ pics, w, h, r }: { pics: Pic[]; w: number; h: number; r: numbe
   );
 }
 
-function Badge({ text, big, mid }: { text: string; big?: boolean; mid?: boolean }) {
+export function Badge({ text, big, mid }: { text: string; big?: boolean; mid?: boolean }) {
   const t = useT();
   return (
     <View style={[g.badge, mid && g.badgeMid, big && g.badgeBig, { backgroundColor: t.dark ? 'rgba(18,18,17,0.82)' : 'rgba(255,255,255,0.94)' }]}>
@@ -130,8 +130,8 @@ export function Grid({ open, photos, groups, setGroups, onBack, onMore, onTalk }
 }
 
 /* ---------- talking through the photos, one photo or one group at a time ---------- */
-export function Talk({ open, photos, groups, onBack, onRecord, onDone }: {
-  open: boolean; photos: Pic[]; groups: number[][]; onBack: () => void;
+export function Talk({ open, photos, groups, onBack, onCamera, onMore, onRecord, onDone }: {
+  open: boolean; photos: Pic[]; groups: number[][]; onBack: () => void; onCamera: () => void; onMore: () => void;
   onRecord: { start: () => void; stop: () => void; cancel: () => void }; onDone: (s: Said) => void;
 }) {
   const t = useT();
@@ -199,7 +199,7 @@ export function Talk({ open, photos, groups, onBack, onRecord, onDone }: {
         {recording ? <>{tag}{S.is}{strike ? <Text style={{ color: t.strike, textDecorationLine: 'line-through' }}>{S.fillers[k % 4]}</Text> : null}{said[k] || line(k)}</> : <Text style={{ color: t.mut }}>{S.numHowSub}</Text>}
       </Text>
 
-      <ScrollView ref={rail} horizontal showsHorizontalScrollIndicator={false} style={[g.rail, { bottom: ins.bottom + 34 + SZ.key + 22 }]} contentContainerStyle={{ paddingHorizontal: 24, gap: 6, alignItems: 'center' }}>
+      <ScrollView ref={rail} horizontal showsHorizontalScrollIndicator={false} style={[g.rail, { bottom: ins.bottom + 30 + SZ.talk + 28 + 20 }]} contentContainerStyle={{ paddingHorizontal: 24, gap: 6, alignItems: 'center' }}>
         {units.map((x, i) => {
           const w = x.idx.length > 1 ? 74 : 34;
           return (
@@ -213,8 +213,8 @@ export function Talk({ open, photos, groups, onBack, onRecord, onDone }: {
       </ScrollView>
 
       <View style={[g.bottom, { bottom: ins.bottom + 34 }]}>
-        <TalkKey label={S.tapTalk} sideIcon="plus" state={rec} setState={setRec} secs={secs}
-          onStart={start} onStop={() => stop(true)} onCancel={() => stop(false)} />
+        <TalkKey left={{ icon: 'camera', label: S.camera, onPress: onCamera }} right={{ icon: 'photo', label: S.library, onPress: onMore }}
+          state={rec} setState={setRec} secs={secs} onStart={start} onStop={() => stop(true)} onCancel={() => stop(false)} />
       </View>
     </Screen>
   );

@@ -34,6 +34,8 @@ export default function App() {
   const [photos, setPhotos] = useState<Pic[]>([]);
   const [groups, setGroups] = useState<number[][]>([]);
   const [said, setSaid] = useState<Said[]>([]);
+  const [laid, setLaid] = useState(0);          // how many of the things said are already laid out as a page
+  const [making, setMaking] = useState(false);
   const [voiceUri, setVoiceUri] = useState<string | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
@@ -55,6 +57,24 @@ export default function App() {
       Haptics.selectionAsync().catch(() => {});
       setPane('grid');
     } catch { /* picker unavailable */ }
+  }
+
+  async function shoot() {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) return;
+      const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 });
+      if (r.canceled || !r.assets.length) return;
+      setPhotos((p) => [...p, { uri: r.assets[0].uri }]);
+      setPane('grid');
+    } catch { /* no camera, e.g. the simulator */ }
+  }
+
+  /* laying out is a step the person chooses; it takes everything said so far */
+  function layout() {
+    const n = said.length;
+    setMaking(true);
+    setTimeout(() => { setLaid(n); setMaking(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }, 2000);
   }
 
   /* the real microphone runs under the demo transcript, so "play what you just said" plays your voice */
@@ -90,14 +110,14 @@ export default function App() {
             <DotField />
             {fontsLoaded && (
               <>
-                <Home hidden={pane !== null} night={h >= 18 || h < 5} photos={photos} saidCount={said.length}
-                  onPick={() => (photos.length ? setPane('grid') : pick(false))} onOpen={setPane} onRecord={rec}
-                  onSaved={(text) => { setSaid((x) => [...x, { kind: 'talk', text }]); setPane('entry'); }} />
+                <Home hidden={pane !== null} night={h >= 18 || h < 5} photos={photos} said={said} laid={laid} making={making}
+                  onCamera={shoot} onPick={() => (photos.length ? setPane('grid') : pick(false))} onOpen={setPane} onRecord={rec}
+                  onSaved={(text) => setSaid((x) => [...x, { kind: 'talk', text }])} onLayout={layout} />
                 <Grid open={pane === 'grid' || pane === 'talk'} photos={photos} groups={groups} setGroups={setGroups}
                   onBack={() => setPane(null)} onMore={() => pick(true)} onTalk={() => setPane('talk')} />
-                <Talk open={pane === 'talk'} photos={photos} groups={groups} onBack={() => setPane('grid')} onRecord={rec}
-                  onDone={(x) => { setSaid((s) => [...s, x]); setPane('entry'); }} />
-                <Entry open={pane === 'entry'} onClose={() => setPane(null)} onArchive={() => setPane('archive')} voiceUri={voiceUri} photos={photos} said={said} />
+                <Talk open={pane === 'talk'} photos={photos} groups={groups} onBack={() => setPane('grid')} onCamera={shoot} onMore={() => pick(true)} onRecord={rec}
+                  onDone={(x) => { setSaid((s) => [...s, x]); setPane(null); }} />
+                <Entry open={pane === 'entry'} onClose={() => setPane(null)} onArchive={() => setPane('archive')} voiceUri={voiceUri} />
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={() => setPane('entry')} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
                 <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} />

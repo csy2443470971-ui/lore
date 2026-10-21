@@ -19,11 +19,12 @@ export function useFace() {
   return { body: zh ? F.cn : F.serif, title: zh ? F.cnMed : F.serif, italic: zh ? F.cn : F.serifIt };
 }
 
-type IconName = 'cal' | 'gear' | 'mic' | 'book' | 'user' | 'back' | 'down' | 'plus' | 'photo' | 'close' | 'chev' | 'pin' | 'list' | 'settings' | 'up';
+type IconName = 'camera' | 'cal' | 'gear' | 'mic' | 'book' | 'user' | 'back' | 'down' | 'plus' | 'photo' | 'close' | 'chev' | 'pin' | 'list' | 'settings' | 'up';
 export function Icon({ name, color, size = 18 }: { name: IconName; color: string; size?: number }) {
   const p = { stroke: color, strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' };
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
+      {name === 'camera' && (<><Path d="M4 8.5a2 2 0 0 1 2-2h2.2l1.6-2.2h4.4l1.6 2.2H18a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" {...p} /><Circle cx={12} cy={12.6} r={3.3} {...p} /></>)}
       {name === 'cal' && (<><Rect x={4} y={5.5} width={16} height={14} rx={3} {...p} /><Path d="M4 10h16M9 3.5v4M15 3.5v4" {...p} /></>)}
       {(name === 'gear' || name === 'settings') && (<><Circle cx={12} cy={12} r={3} {...p} /><Path d="M12 3.5v2.5M12 18v2.5M3.5 12H6M18 12h2.5M6 6l1.8 1.8M16.2 16.2L18 18M6 18l1.8-1.8M16.2 7.8L18 6" {...p} /></>)}
       {name === 'mic' && <Path d="M12 3.5a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0v-5a3 3 0 0 1 3-3zM5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" {...p} />}
@@ -117,24 +118,26 @@ export function Panel({ open, top, children, footer, onBack }: { open: boolean; 
   );
 }
 
-/* ---------- the talk button: tap to start and tap again to finish, or hold and let go ---------- */
+/* ---------- the talk key: a plain circle between the camera and the photo library.
+   Tap to start and tap again to finish, or hold it and let go. ---------- */
 export type RecState = 'idle' | 'pending' | 'tap' | 'hold';
-export function TalkKey({ label, sideIcon, onSide, onStart, onStop, onCancel, state, setState, secs }: {
-  label: string; sideIcon: IconName; onSide?: () => void; onStart: () => void; onStop: () => void; onCancel: () => void;
+type Side = { icon: IconName; label: string; onPress?: () => void };
+export function TalkKey({ left, right, onStart, onStop, onCancel, state, setState, secs }: {
+  left: Side; right: Side; onStart: () => void; onStop: () => void; onCancel: () => void;
   state: RecState; setState: (s: RecState) => void; secs: number;
 }) {
   const t = useT();
   const S = useS();
   const pressedAt = useRef(0);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const blink = useState(() => new Animated.Value(1))[0];
+  const pulse = useState(() => new Animated.Value(1))[0];
   useEffect(() => {
     if (state === 'tap' || state === 'hold') {
-      const a = Animated.loop(Animated.sequence([Animated.timing(blink, { toValue: 0.25, duration: 500, useNativeDriver: true }), Animated.timing(blink, { toValue: 1, duration: 500, useNativeDriver: true })]));
+      const a = Animated.loop(Animated.sequence([Animated.timing(pulse, { toValue: 1.08, duration: 600, easing: EASE, useNativeDriver: true }), Animated.timing(pulse, { toValue: 1, duration: 600, easing: EASE, useNativeDriver: true })]));
       a.start(); return () => a.stop();
     }
-    blink.setValue(1);
-  }, [state, blink]);
+    Animated.timing(pulse, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+  }, [state, pulse]);
   function pressIn() {
     if (state === 'tap') return;            // the second tap ends on release
     pressedAt.current = Date.now();
@@ -150,19 +153,19 @@ export function TalkKey({ label, sideIcon, onSide, onStart, onStop, onCancel, st
   }
   const mm = `${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, '0')}`;
   const recording = state !== 'idle';
-  const held = state === 'hold';
-  const text = state === 'tap' ? S.saidDone : held ? S.releaseEnd : label;
+  const under = state === 'tap' ? S.recTap(mm) : state === 'hold' ? S.recHold(mm) : S.tapOrHold;
   return (
-    <View style={s.keyRow}>
-      {state === 'tap'
-        ? <Round icon="close" label={S.cancel} size={SZ.key} onPress={onCancel} />
-        : <Round icon={sideIcon} label={sideIcon === 'photo' ? S.addPhotos : S.clearPhotos} size={SZ.key} onPress={recording ? undefined : onSide} dim={recording} />}
-      <Pressable onPressIn={pressIn} onPressOut={pressOut} accessibilityRole="button" accessibilityLabel={text}
-        style={[s.pill, { height: SZ.key, borderRadius: SZ.key / 2, backgroundColor: held ? t.red : t.pill }]}>
-        <Animated.View style={[s.dot, { backgroundColor: held ? '#fff' : t.red, borderRadius: held ? 2 : 5, opacity: recording ? blink : 1 }]} />
-        <Text style={[s.pillT, { color: held ? '#fff' : t.pillText }]}>{text}</Text>
-        {recording ? <Text style={[s.tm, { color: held ? '#fff' : t.pillText }]}>{mm}</Text> : null}
-      </Pressable>
+    <View style={s.keyWrap}>
+      <View style={s.keyRow}>
+        {state === 'tap'
+          ? <Round icon="close" label={S.cancel} size={SZ.key} onPress={onCancel} />
+          : <Round icon={left.icon} label={left.label} size={SZ.key} onPress={recording ? undefined : left.onPress} dim={recording} />}
+        <Pressable onPressIn={pressIn} onPressOut={pressOut} accessibilityRole="button" accessibilityLabel={under} hitSlop={10}>
+          <Animated.View style={[s.circle, { backgroundColor: recording ? t.red : t.pill, transform: [{ scale: pulse }] }]} />
+        </Pressable>
+        <Round icon={right.icon} label={right.label} size={SZ.key} onPress={recording ? undefined : right.onPress} dim={recording} />
+      </View>
+      <Text style={[s.under, { color: recording ? t.ink : t.mut }]}>{under}</Text>
     </View>
   );
 }
@@ -184,9 +187,8 @@ export const s = StyleSheet.create({
   paper: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: SZ.panelR, borderTopRightRadius: SZ.panelR, overflow: 'hidden' },
   edge: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 22 },
   topLbl: { fontSize: 17, fontWeight: '500' },
-  keyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  pill: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, paddingHorizontal: 22 },
-  dot: { width: 9, height: 9 },
-  pillT: { fontSize: 14.5, fontWeight: '500' },
-  tm: { fontFamily: F.serif, fontSize: 14, opacity: 0.7, fontVariant: ['tabular-nums'] },
+  keyWrap: { alignItems: 'center', gap: 10 },
+  keyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 },
+  circle: { width: SZ.talk, height: SZ.talk, borderRadius: SZ.talk / 2 },
+  under: { fontSize: 12.5, height: 18, fontVariant: ['tabular-nums'] },
 });
