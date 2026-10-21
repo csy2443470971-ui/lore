@@ -47,7 +47,7 @@ export function Page({ items, photos }: { items: Said[]; photos: Pic[] }) {
   const face = useFace();
   const zh = useLang() === 'zh';
   const tx = useTx();
-  const inner = Dimensions.get('window').width - 24 - 40;
+  const inner = Dimensions.get('window').width - 2 * SZ.px - 40;
   const first = items.flatMap((x) => (x.kind === 'photos' ? x.parts.map((p) => p.unit.idx[0]) : []))[0];
   const cover = first !== undefined ? photos[first] : undefined;
   return (

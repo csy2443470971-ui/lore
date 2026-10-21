@@ -13,12 +13,11 @@ import { Pic, Said } from './src/session';
 import { dark as darkT, light as lightT } from './src/theme';
 import { DotField, LangCtx, ThemeCtx } from './src/ui';
 import { Home } from './src/Home';
-import { Grid } from './src/Photos';
 import { Entry } from './src/Entry';
 import { Archive, Insights, Settings } from './src/Screens';
 
 type Mode = 'light' | 'dark' | 'auto';
-type Pane = null | 'grid' | 'entry' | 'archive' | 'insights' | 'settings';
+type Pane = null | 'entry' | 'archive' | 'insights' | 'settings';
 
 /* One screen: home is the writing window; photos, the day page, look back and settings slide over it. */
 export default function App() {
@@ -48,14 +47,13 @@ export default function App() {
   const setMode = (m: Mode) => { setModeState(m); AsyncStorage.setItem('qd-mode', m).catch(() => {}); };
   const setLang = (l: Lang) => { setLangState(l); AsyncStorage.setItem('qd-lang', l).catch(() => {}); };
 
-  async function pick(add: boolean) {
+  async function pick() {
     try {
       const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, orderedSelection: true, selectionLimit: 60, quality: 0.7 });
       if (r.canceled || !r.assets.length) return;
       const next = r.assets.map((a) => ({ uri: a.uri }));
-      if (add) setPhotos((p) => [...p, ...next]); else { setPhotos(next); setGroups([]); }
+      setPhotos((p) => [...p, ...next]);
       Haptics.selectionAsync().catch(() => {});
-      setPane('grid');
     } catch { /* picker unavailable */ }
   }
 
@@ -66,7 +64,6 @@ export default function App() {
       const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 });
       if (r.canceled || !r.assets.length) return;
       setPhotos((p) => [...p, { uri: r.assets[0].uri }]);
-      setPane('grid');
     } catch { /* no camera, e.g. the simulator */ }
   }
 
@@ -110,12 +107,9 @@ export default function App() {
             <DotField />
             {fontsLoaded && (
               <>
-                <Home hidden={pane !== null} night={h >= 18 || h < 5} photos={photos} said={said} laid={laid} making={making}
-                  onCamera={shoot} onPick={() => (photos.length ? setPane('grid') : pick(false))} onOpen={setPane} onRecord={rec}
-                  onSaved={(text) => setSaid((x) => [...x, { kind: 'talk', text }])} onLayout={layout} />
-                <Grid open={pane === 'grid'} photos={photos} groups={groups} setGroups={setGroups} onBack={() => setPane(null)}
-                  onCamera={shoot} onMore={() => pick(true)} onRecord={rec}
-                  onDone={(x) => { setSaid((s) => [...s, x]); setTimeout(() => setPane(null), 700); }} />
+                <Home hidden={pane !== null} night={h >= 18 || h < 5} photos={photos} groups={groups} setGroups={setGroups}
+                  said={said} laid={laid} making={making} onCamera={shoot} onPick={pick} onOpen={setPane} onRecord={rec}
+                  onSaved={(x) => setSaid((s) => [...s, x])} onLayout={layout} />
                 <Entry open={pane === 'entry'} onClose={() => setPane(null)} onArchive={() => setPane('archive')} voiceUri={voiceUri} />
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={() => setPane('entry')} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />

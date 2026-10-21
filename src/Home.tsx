@@ -1,35 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Page, Stream } from './Doc';
-import { PHOTO } from './images';
-import { Pic, Said } from './session';
+import { Tray } from './Photos';
+import { Pic, Said, unitsOf } from './session';
 import { SZ } from './theme';
-import { EASE, Glow, RecState, Round, TalkKey, useFace, useLang, useS, useT, useTimer } from './ui';
+import { Glow, RecState, Round, TalkKey, useFace, useLang, useS, useT, useTimer } from './ui';
 
-/* one photo that drifts a few points up and down, out of step with the others */
-function Float({ src, x, y, size, delay }: { src: Pic; x: number; y: number; size: number; delay: number }) {
-  const v = useState(() => new Animated.Value(0))[0];
-  useEffect(() => {
-    const a = Animated.loop(Animated.sequence([Animated.delay(delay), Animated.timing(v, { toValue: -5, duration: 3000, easing: EASE, useNativeDriver: true }), Animated.timing(v, { toValue: 0, duration: 3000, easing: EASE, useNativeDriver: true })]));
-    a.start(); return () => a.stop();
-  }, [v, delay]);
-  return (
-    <Animated.View style={{ position: 'absolute', left: x, top: y, width: size, height: size, borderRadius: 18, overflow: 'hidden', transform: [{ translateY: v }] }}>
-      <Image source={src.uri ? { uri: src.uri } : src.asset} style={StyleSheet.absoluteFill} contentFit="cover" />
-    </Animated.View>
-  );
-}
-
-/* Home is today's writing window. What you say stays here as tidied words; Lay out turns it into a page when you choose. */
-export function Home({ hidden, night, photos, said, laid, making, onCamera, onPick, onOpen, onRecord, onSaved, onLayout }: {
-  hidden: boolean; night: boolean; photos: Pic[]; said: Said[]; laid: number; making: boolean;
+/* The one writing page. Empty, with photos, or carrying on later, it is the same page:
+   today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
+export function Home({ hidden, night, photos, groups, setGroups, said, laid, making, onCamera, onPick, onOpen, onRecord, onSaved, onLayout }: {
+  hidden: boolean; night: boolean; photos: Pic[]; groups: number[][]; setGroups: (g: number[][]) => void;
+  said: Said[]; laid: number; making: boolean;
   onCamera: () => void; onPick: () => void;
   onOpen: (p: 'archive' | 'settings') => void;
   onRecord: { start: () => void; stop: () => void; cancel: () => void };
-  onSaved: (text: string) => void; onLayout: () => void;
+  onSaved: (s: Said) => void; onLayout: () => void;
 }) {
   const t = useT();
   const S = useS();
@@ -38,53 +25,80 @@ export function Home({ hidden, night, photos, said, laid, making, onCamera, onPi
   const ins = useSafeAreaInsets();
   const W = Dimensions.get('window').width;
   const [rec, setRec] = useState<RecState>('idle');
+  const [mode, setMode] = useState<'talk' | 'photos'>('talk');
   const [shown, setShown] = useState(0);
   const [cleaned, setCleaned] = useState(false);
+  const [k, setK] = useState(-1);                                    // the photo or group being talked about
+  const [lines, setLines] = useState<Record<number, string>>({});
+  const [select, setSelect] = useState(false);
+  const [sel, setSel] = useState<number[]>([]);
   const secs = useTimer(rec !== 'idle');
   const fade = useState(() => new Animated.Value(1))[0];
-  const words = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tick = useRef<ReturnType<typeof setInterval> | null>(null);
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
 
   useEffect(() => { Animated.timing(fade, { toValue: hidden ? 0 : 1, duration: 360, useNativeDriver: true }).start(); }, [hidden, fade]);
+  useEffect(() => () => { if (tick.current) clearInterval(tick.current); }, []);
+
+  const units = unitsOf(photos.length, groups);
+  const talked = new Set(said.flatMap((x) => (x.kind === 'photos' ? x.parts.map((p) => p.unit.idx[0]) : [])));
+  const laidIdx = new Set(said.slice(0, laid).flatMap((x) => (x.kind === 'photos' ? x.parts.map((p) => p.unit.idx[0]) : [])));
+  const pending = units.map((u, n) => (talked.has(u.idx[0]) ? -1 : n)).filter((n) => n >= 0);
+  const showTray = units.some((u) => !laidIdx.has(u.idx[0]));
+  const raws = [S.raw, S.raw2, S.raw3];
+  const raw = raws[said.filter((x) => x.kind === 'talk').length % raws.length];
+  const line = (n: number) => S.demoLines[n % S.demoLines.length];
 
   function start() {
-    setShown(1); setCleaned(false); onRecord.start();
-    words.current = setInterval(() => setShown((n) => Math.min(S.raw.length, n + 1)), 450);
+    onRecord.start();
+    if (showTray && pending.length) {
+      /* demo: as you go "one is…, two is…", the matching photo lights up */
+      setMode('photos'); setLines({}); setK(pending[0]);
+      let j = 0;
+      tick.current = setInterval(() => {
+        const n = pending[j];
+        setLines((m) => ({ ...m, [n]: line(n) }));
+        j++; if (j < pending.length) setK(pending[j]); else if (tick.current) clearInterval(tick.current);
+      }, 3200);
+    } else {
+      setMode('talk'); setShown(1); setCleaned(false);
+      tick.current = setInterval(() => setShown((n) => Math.min(raw.length, n + 1)), 450);
+    }
   }
   function finish(keep: boolean) {
-    if (words.current) clearInterval(words.current);
+    if (tick.current) clearInterval(tick.current);
     setRec('idle');
-    if (!keep) { onRecord.cancel(); setShown(0); return; }
+    if (!keep) { onRecord.cancel(); setShown(0); setK(-1); setLines({}); return; }
     onRecord.stop();
+    if (mode === 'photos') {
+      const all = k >= 0 ? { ...lines, [k]: line(k) } : lines;
+      onSaved({ kind: 'photos', parts: pending.filter((n) => all[n]).map((n) => ({ unit: units[n], text: all[n] })) });
+      setK(-1); setLines({});
+      return;
+    }
     setCleaned(true);            // the filler words drop out in place, then the words settle into the transcript
-    const text = S.raw.slice(0, Math.max(shown, 4)).filter((w) => w[1] !== 1).map((w) => w[0]).join('');
-    setTimeout(() => { onSaved(text); setShown(0); setCleaned(false); }, 900);
+    const text = raw.slice(0, Math.max(shown, 4)).filter((w) => w[1] !== 1).map((w) => w[0]).join('');
+    setTimeout(() => { onSaved({ kind: 'talk', text }); setShown(0); setCleaned(false); }, 900);
   }
+  function toggle(i: number) { setSel((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i])); }
+  function group() { if (sel.length < 2) return; setGroups([...groups, sel.slice().sort((a, b) => a - b)]); setSel([]); setSelect(false); }
 
-  const live = rec !== 'idle' || shown > 0;
-  const empty = !said.length && !live && !making;
+  const recording = rec !== 'idle';
+  const liveTalk = mode === 'talk' && (recording || shown > 0);
+  const livePhotos = mode === 'photos' && recording;
   const unlaid = said.slice(laid);
-  const canLayout = unlaid.length > 0 && !live && !making;
+  const nothing = !said.length && !photos.length && !liveTalk && !making;
+  const canLayout = unlaid.length > 0 && !recording && !shown && !making && !select;
   const top = ins.top + 8;
   const ctlBottom = ins.bottom + 30;
   const ctlH = SZ.talk + 28;
   const listBottom = ctlBottom + ctlH + (canLayout ? 70 : 30);
-  const fl: Pic[] = photos.length ? photos.slice(0, 3) : [{ asset: PHOTO.cafe }, { asset: PHOTO.sunset }, { asset: PHOTO.latte }];
   const tx = [zh ? h.tx : h.txEn, { color: t.ink, fontFamily: face.body }];
+  const reached = livePhotos ? pending.filter((n) => lines[n] || n === k) : [];
 
   return (
     <Animated.View pointerEvents={hidden ? 'none' : 'box-none'} style={[StyleSheet.absoluteFill, { opacity: fade }]}>
-      {empty ? (
-        <>
-          <View style={[h.hello, { top: top + 64 }]}>
-            <Text style={[h.small, { color: t.mut, fontFamily: face.body }]}>{S.hi(night)}</Text>
-            <Text style={[h.h3, { color: t.ink, fontFamily: face.title }]}>{S.ask0}</Text>
-          </View>
-          <Float src={fl[0]} x={38} y={top + 194} size={62} delay={0} />
-          {fl[1] ? <Float src={fl[1]} x={W - 36 - 80} y={top + 182} size={80} delay={900} /> : null}
-          {fl[2] ? <Float src={fl[2]} x={W / 2 - 34} y={top + 252} size={48} delay={1800} /> : null}
-        </>
-      ) : making ? (
+      {making ? (
         <View style={[StyleSheet.absoluteFill, h.making]} pointerEvents="none">
           <Glow top={Dimensions.get('window').height / 2 - 200} size={320} />
           <Text style={{ fontSize: 22, color: t.ink }}>✦</Text>
@@ -92,24 +106,48 @@ export function Home({ hidden, night, photos, said, laid, making, onCamera, onPi
         </View>
       ) : (
         <ScrollView ref={scroll} style={[StyleSheet.absoluteFill, { top: top + 50 }]} showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
-          onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
+          contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
+          onContentSizeChange={() => { if (!select && !livePhotos && said.length) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page items={said.slice(0, laid)} photos={photos} /> : null}
-          {unlaid.length ? <View style={{ paddingHorizontal: 8 }}><Stream items={unlaid} photos={photos} /></View> : null}
-          {live ? (
-            <Text style={[tx, { paddingHorizontal: 8 }]}>
-              {S.raw.slice(0, shown).map((w, i) => {
+
+          {showTray ? (
+            <View style={{ gap: 10 }}>
+              <View style={h.trayHead}>
+                <Text style={{ fontSize: 13, color: t.mut }}>{select ? S.selN(sel.length) : groups.length ? S.photosOfG(photos.length, groups.length) : S.photosOf(photos.length)}</Text>
+                <Pressable disabled={recording} hitSlop={8} onPress={() => { setSelect(!select); setSel([]); }}>
+                  <Text style={{ fontSize: 13.5, color: select ? t.ink : t.mut, opacity: recording ? 0.35 : 1 }}>{select ? S.cancel : S.groupBtn}</Text>
+                </Pressable>
+              </View>
+              <Tray photos={photos} groups={groups} width={W - 2 * SZ.px} select={select} sel={sel} onToggle={toggle} cur={livePhotos ? k : -1} />
+              {select ? <Text style={[h.hint, { color: t.mut }]}>{S.selHow}</Text>
+                : pending.length && !recording ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>{S.photoHow}</Text> : null}
+            </View>
+          ) : null}
+
+          {unlaid.length ? <Stream items={unlaid} photos={photos} /> : null}
+
+          {livePhotos && reached.length ? <Stream items={[{ kind: 'photos', parts: reached.map((n) => ({ unit: units[n], text: lines[n] || line(n) })) }]} photos={photos} /> : null}
+          {liveTalk ? (
+            <Text style={tx}>
+              {raw.slice(0, shown).map((w, i) => {
                 if (w[1] === 1 && cleaned) return null;
                 return <Text key={i} style={w[1] === 1 ? { color: t.strike, textDecorationLine: 'line-through' } : null}>{w[0]}</Text>;
               })}
             </Text>
           ) : null}
+
+          {nothing ? (
+            <View style={{ marginTop: 24, gap: 8 }}>
+              <Text style={{ fontSize: 14, color: t.mut, fontFamily: face.body }}>{S.hi(night)}</Text>
+              <Text style={[h.ask, { color: t.ink, fontFamily: face.title }]}>{S.ask0}</Text>
+            </View>
+          ) : null}
         </ScrollView>
       )}
 
-      {!empty && !making ? <LinearGradient colors={[t.b + '00', t.b]} locations={[0, 0.45]} style={[h.fadeOut, { height: listBottom }]} pointerEvents="none" /> : null}
+      {!making ? <LinearGradient colors={[t.b + '00', t.b]} locations={[0, 0.45]} style={[h.fadeOut, { height: listBottom }]} pointerEvents="none" /> : null}
 
-      <View style={[h.tb, { top, backgroundColor: empty || making ? 'transparent' : t.b }]}>
+      <View style={[h.tb, { top, backgroundColor: t.b }]}>
         <Text style={[h.title, { color: t.ink, fontFamily: face.title }]}>{S.navToday}</Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Round icon="cal" label={S.archive} onPress={() => onOpen('archive')} />
@@ -124,9 +162,16 @@ export function Home({ hidden, night, photos, said, laid, making, onCamera, onPi
         </Pressable>
       ) : null}
 
-      <View style={[h.ctl, { bottom: ctlBottom }]} pointerEvents={making ? 'none' : 'box-none'}>
-        <TalkKey left={{ icon: 'camera', label: S.camera, onPress: onCamera }} right={{ icon: 'photo', label: S.library, onPress: onPick }}
-          state={rec} setState={setRec} secs={secs} onStart={start} onStop={() => finish(true)} onCancel={() => finish(false)} />
+      <View style={[h.ctl, { bottom: ctlBottom, height: ctlH }]} pointerEvents={making ? 'none' : 'box-none'}>
+        {select ? (
+          <View style={h.selRow}>
+            <Pressable onPress={() => setSel([])} style={[h.ghost, { backgroundColor: t.panel }]}><Text style={{ color: t.ink, fontSize: 14.5 }}>{S.clear}</Text></Pressable>
+            <Pressable onPress={group} style={[h.pill, { backgroundColor: t.pill, opacity: sel.length < 2 ? 0.4 : 1 }]}><Text style={{ color: t.pillText, fontSize: 14.5, fontWeight: '500' }}>{S.makeGroup(sel.length)}</Text></Pressable>
+          </View>
+        ) : (
+          <TalkKey left={{ icon: 'camera', label: S.camera, onPress: onCamera }} right={{ icon: 'photo', label: S.library, onPress: onPick }}
+            state={rec} setState={setRec} secs={secs} onStart={start} onStop={() => finish(true)} onCancel={() => finish(false)} />
+        )}
       </View>
     </Animated.View>
   );
@@ -135,14 +180,17 @@ export function Home({ hidden, night, photos, said, laid, making, onCamera, onPi
 const h = StyleSheet.create({
   tb: { position: 'absolute', left: 0, right: 0, paddingLeft: SZ.px, paddingRight: SZ.px - 4, height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 22 },
-  hello: { position: 'absolute', left: SZ.px, right: SZ.px, alignItems: 'center' },
-  small: { fontSize: 13.5, letterSpacing: 0.3 },
-  h3: { fontSize: 28, lineHeight: 38, textAlign: 'center', marginTop: 6 },
+  ask: { fontSize: 28, lineHeight: 38 },
   tx: { fontSize: 16, lineHeight: 29 },
   txEn: { fontSize: 17.5, lineHeight: 27 },
+  trayHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  hint: { fontSize: 13.5, lineHeight: 21 },
   making: { alignItems: 'center', justifyContent: 'center', gap: 12, paddingBottom: 80 },
   makingT: { fontSize: 15.5 },
   fadeOut: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   layout: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, height: 38, paddingHorizontal: 18, borderRadius: 19 },
-  ctl: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  ctl: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'flex-start' },
+  selRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: (SZ.talk - SZ.key) / 2 },
+  ghost: { height: SZ.key, paddingHorizontal: 18, borderRadius: SZ.key / 2, justifyContent: 'center' },
+  pill: { height: SZ.key, paddingHorizontal: 22, borderRadius: SZ.key / 2, justifyContent: 'center' },
 });
