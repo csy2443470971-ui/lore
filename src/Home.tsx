@@ -92,7 +92,7 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
   const top = ins.top + 8;
   const ctlBottom = ins.bottom + 30;
   const ctlH = SZ.talk + 28;
-  const listBottom = ctlBottom + ctlH + (canLayout ? 70 : 30);
+  const listBottom = ctlBottom + ctlH + (canLayout ? 96 : 30);
   const tx = [zh ? h.tx : h.txEn, { color: t.ink, fontFamily: face.body }];
   const reached = livePhotos ? pending.filter((n) => lines[n] || n === k) : [];
 
@@ -156,10 +156,12 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
       </View>
 
       {canLayout ? (
-        <Pressable onPress={onLayout} style={({ pressed }) => [h.layout, { bottom: ctlBottom + ctlH + 18, backgroundColor: t.panel, opacity: pressed ? 0.7 : 1 }]}>
-          <Text style={{ fontSize: 14, color: t.ink }}>✦</Text>
-          <Text style={{ fontSize: 14.5, color: t.ink }}>{S.layoutBtn}</Text>
-        </Pressable>
+        <View style={[h.layoutWrap, { bottom: ctlBottom + ctlH + 16 }]} pointerEvents="box-none">
+          <Text style={[h.layoutHint, { color: t.mut, fontFamily: face.body }]}>{S.layoutHint}</Text>
+          <Pressable onPress={onLayout} style={({ pressed }) => [h.layout, { backgroundColor: t.panel, opacity: pressed ? 0.7 : 1 }]}>
+            <Text style={{ fontSize: 14.5, color: t.ink }}>{S.layoutBtn}</Text>
+          </Pressable>
+        </View>
       ) : null}
 
       <View style={[h.ctl, { bottom: ctlBottom, height: ctlH }]} pointerEvents={making ? 'none' : 'box-none'}>
@@ -188,7 +190,9 @@ const h = StyleSheet.create({
   making: { alignItems: 'center', justifyContent: 'center', gap: 12, paddingBottom: 80 },
   makingT: { fontSize: 15.5 },
   fadeOut: { position: 'absolute', left: 0, right: 0, bottom: 0 },
-  layout: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, height: 38, paddingHorizontal: 18, borderRadius: 19 },
+  layoutWrap: { position: 'absolute', left: SZ.px, right: SZ.px, alignItems: 'center', gap: 8 },
+  layoutHint: { fontSize: 13, textAlign: 'center' },
+  layout: { height: 38, paddingHorizontal: 22, borderRadius: 19, justifyContent: 'center' },
   ctl: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'flex-start' },
   selRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: (SZ.talk - SZ.key) / 2 },
   ghost: { height: SZ.key, paddingHorizontal: 18, borderRadius: SZ.key / 2, justifyContent: 'center' },
