@@ -98,20 +98,12 @@ export function Home({ hidden, night, photos, saidCount, onPick, onOpen, onRecor
         </View>
       )}
 
-      <View style={[h.ctl, { bottom: ins.bottom + 92 }]}>
+      <View style={[h.ctl, { bottom: ins.bottom + 40 }]}>
         <TalkKey label={S.tapTalk} sideIcon="photo" onSide={onPick} state={rec} setState={setRec} secs={secs}
           onStart={start} onStop={() => finish(true)} onCancel={() => finish(false)} />
         <Text style={[h.under, { color: t.mut }]}>{under}</Text>
       </View>
 
-      <View style={[h.nav, { bottom: ins.bottom + 14, backgroundColor: t.panel, opacity: talking ? 0.3 : 1 }]} pointerEvents={talking ? 'none' : 'auto'}>
-        {([['mic', S.navToday, null], ['book', S.navBack, 'archive'], ['user', S.navMe, 'settings']] as const).map(([ic, lb, to], k) => (
-          <Pressable key={lb} onPress={() => to && onOpen(to)} style={[h.navI, k === 0 && { backgroundColor: t.gray }]}>
-            <Icon name={ic} color={k === 0 ? t.ink : t.mut} size={17} />
-            <Text style={{ fontSize: 11, color: k === 0 ? t.ink : t.mut }}>{lb}</Text>
-          </Pressable>
-        ))}
-      </View>
     </Animated.View>
   );
 }
@@ -129,6 +121,4 @@ const h = StyleSheet.create({
   liveT: { fontSize: 19, lineHeight: 33, textAlign: 'center' },
   ctl: { position: 'absolute', left: 0, right: 0, alignItems: 'center', gap: 10 },
   under: { fontSize: 12.5 },
-  nav: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', gap: 2, padding: 4, borderRadius: 26 },
-  navI: { width: 64, paddingTop: 5, paddingBottom: 4, borderRadius: 22, alignItems: 'center' },
 });

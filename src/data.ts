@@ -29,6 +29,8 @@ export const SCENES: Scene[] = [
 ];
 
 export type Layout = 'mix' | 'big' | 'quote' | 'time';
+export type Kind = 'day' | 'three' | 'week';
+export type Ent = { k: Kind; when: string; t: string; s: string; p: string[]; day?: number; today?: boolean };
 export type Day = { n: number; d: string; t?: string; s?: string; p?: string; m?: string; today?: boolean; empty?: boolean; future?: boolean };
 
 /* 1 = filler to remove, 2 = the speaker's own phrasing to keep and mark */
@@ -88,6 +90,26 @@ const zh = {
     { n: 17, d: '周六', t: '西湖慢慢走', s: '突然觉得截止日期也没那么可怕了。', p: 'sunset', m: '4 分钟', today: true },
     { n: 18, d: '周日', future: true },
   ] as Day[],
+  look: '回看', insightsBtn: '生成这个月的洞察', insights: '洞察', insightsGen: '正在读这个月写过的……', insightsLede: '从 16 篇日记、58 分钟录音里看出来的。', whenTalk: '哪几天说得多', avgMin: '平均分钟',
+  kAll: '全部', kDay: '每天', kThree: '三天', kWeek: '每周', written: '写过的',
+  entries: [
+    { k: 'day', when: '10月17日，今天', t: '西湖慢慢走', s: '突然觉得截止日期也没那么可怕了。', p: ['sunset', 'cafe', 'latte'], day: 17, today: true },
+    { k: 'day', when: '10月16日', t: '火锅局', s: '和小林吃到快十二点，聊到辞职。', p: ['hotpot'], day: 16 },
+    { k: 'three', when: '10月14日至16日', t: '桂花、灯笼和火锅', s: '三天里两次说到回家，一次说到辞职。', p: ['osmanthus', 'lanterns', 'hotpot'] },
+    { k: 'day', when: '10月15日', t: '南山路的灯笼', s: '灯笼一下全亮起来的那一刻。', p: ['lanterns'], day: 15 },
+    { k: 'day', when: '10月14日', t: '给妈妈打电话', s: '她说桂花开了，让我周末回家。', p: ['osmanthus'], day: 14 },
+    { k: 'day', when: '10月12日', t: '下雨天的面', s: '巷子口那碗面，雨一直没停。', p: ['noodles'], day: 12 },
+    { k: 'week', when: '第 41 周，10月5日至11日', t: '下雨的一周', s: '说了 19 分钟。“截止日期”出现了四次，周日跑完了十公里。', p: ['causeway', 'latte', 'lanterns', 'noodles'] },
+    { k: 'day', when: '10月11日', t: '跑完十公里', s: '白堤上一口气跑完，腿是软的，心情很好。', p: ['causeway'], day: 11 },
+    { k: 'three', when: '10月6日至8日', t: '雨下了三天', s: '咖啡、加班，还有一把忘在地铁上的伞。', p: ['latte', 'lanterns', 'causeway'] },
+    { k: 'day', when: '10月8日', t: '加班到九点', s: '走出办公楼，路灯已经亮了。', p: ['lanterns'], day: 8 },
+    { k: 'day', when: '10月7日', t: '新的咖啡豆', s: '换了一家烘焙，酸一点，我喜欢。', p: ['latte'], day: 7 },
+    { k: 'day', when: '10月6日', t: '白堤骑车', s: '风很大，骑得很慢。', p: ['causeway'], day: 6 },
+    { k: 'week', when: '第 40 周，9月28日至10月4日', t: '放假回家', s: '说了 16 分钟，大部分在说吃的。', p: ['osmanthus', 'noodles', 'hotpot', 'cafe'] },
+    { k: 'day', when: '10月4日', t: '妈妈做的桂花糖', s: '她说今年的桂花开得晚。', p: ['osmanthus'], day: 4 },
+    { k: 'day', when: '10月3日', t: '到家了', s: '楼下那家面馆还开着。', p: ['noodles'], day: 3 },
+    { k: 'day', when: '10月1日', t: '假期第一天', s: '在咖啡馆坐了一下午，什么都没干。', p: ['cafe'], day: 1 },
+  ] as Ent[],
   isToday: '今天', tomorrow: '明天', notYet: '还没到', silent: '没说话，也没关系',
   monthTitle: '十月', monthSub: '2026 年', monthLede: '慢慢变凉的一个月。“截止日期”说了九次，最后一次是笑着说的。',
   wd: ['一', '二', '三', '四', '五', '六', '日'], less: '说得少', more: '说得多',
@@ -167,6 +189,26 @@ const en: typeof zh = {
     { n: 17, d: 'Saturday', t: 'A slow walk by the lake', s: 'Suddenly the deadline didn’t feel so scary.', p: 'sunset', m: '4 min', today: true },
     { n: 18, d: 'Sunday', future: true },
   ],
+  look: 'Look back', insightsBtn: 'Generate insights for this month', insights: 'Insights', insightsGen: 'Reading this month’s entries…', insightsLede: 'Drawn from 16 entries and 58 minutes of recordings.', whenTalk: 'Which days you talk most', avgMin: 'average minutes',
+  kAll: 'All', kDay: 'Daily', kThree: '3 days', kWeek: 'Weekly', written: 'Written',
+  entries: [
+    { k: 'day', when: 'October 17, today', t: 'A slow walk by the lake', s: 'Suddenly the deadline didn’t feel so scary.', p: ['sunset', 'cafe', 'latte'], day: 17, today: true },
+    { k: 'day', when: 'October 16', t: 'Hotpot night', s: 'Dinner with Lin until almost midnight. We talked about quitting.', p: ['hotpot'], day: 16 },
+    { k: 'three', when: 'October 14–16', t: 'Osmanthus, lanterns and hotpot', s: 'Home came up twice in three days, quitting once.', p: ['osmanthus', 'lanterns', 'hotpot'] },
+    { k: 'day', when: 'October 15', t: 'Lanterns on Nanshan Road', s: 'The moment they all lit up at once.', p: ['lanterns'], day: 15 },
+    { k: 'day', when: 'October 14', t: 'Called Mom', s: 'The osmanthus is blooming. She wants me home this weekend.', p: ['osmanthus'], day: 14 },
+    { k: 'day', when: 'October 12', t: 'Noodles in the rain', s: 'The noodle place at the corner. It rained all day.', p: ['noodles'], day: 12 },
+    { k: 'week', when: 'Week 41, October 5–11', t: 'A rainy week', s: '19 minutes spoken. “Deadline” came up four times, and you ran 10 km on Sunday.', p: ['causeway', 'latte', 'lanterns', 'noodles'] },
+    { k: 'day', when: 'October 11', t: 'Ran 10 km', s: 'All the way along the causeway. Legs like jelly, very happy.', p: ['causeway'], day: 11 },
+    { k: 'three', when: 'October 6–8', t: 'Three days of rain', s: 'Coffee, late nights, and an umbrella left on the subway.', p: ['latte', 'lanterns', 'causeway'] },
+    { k: 'day', when: 'October 8', t: 'Worked until nine', s: 'The streetlights were already on when I walked out.', p: ['lanterns'], day: 8 },
+    { k: 'day', when: 'October 7', t: 'New coffee beans', s: 'A different roaster, a bit more acidic. I like it.', p: ['latte'], day: 7 },
+    { k: 'day', when: 'October 6', t: 'Cycling the causeway', s: 'Strong wind, slow ride.', p: ['causeway'], day: 6 },
+    { k: 'week', when: 'Week 40, September 28 – October 4', t: 'Home for the holiday', s: '16 minutes spoken, mostly about food.', p: ['osmanthus', 'noodles', 'hotpot', 'cafe'] },
+    { k: 'day', when: 'October 4', t: 'Mom’s osmanthus sugar', s: 'She says it bloomed late this year.', p: ['osmanthus'], day: 4 },
+    { k: 'day', when: 'October 3', t: 'Home', s: 'The noodle place downstairs is still open.', p: ['noodles'], day: 3 },
+    { k: 'day', when: 'October 1', t: 'First day off', s: 'A whole afternoon in a café, doing nothing.', p: ['cafe'], day: 1 },
+  ],
   isToday: 'today', tomorrow: 'Tomorrow', notYet: 'Not yet', silent: 'A quiet day, and that’s fine',
   monthTitle: 'October', monthSub: '2026', monthLede: 'A month of cooling down. You said “deadline” nine times, and laughed the last time.',
   wd: ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'], less: 'Less', more: 'More',
@@ -204,4 +246,4 @@ export function parseAsk(q: string): Layout | null {
 }
 
 /* Minutes spoken on Oct 1–17. Oct 1 2026 is a Thursday. */
-export const MONTH_MIN = [3, 0, 5, 8, 0, 2, 6, 4, 0, 0, 7, 3, 0, 6, 2, 8, 4];
+export const MONTH_MIN = [3, 0, 5, 8, 0, 2, 6, 4, 0, 0, 7, 3, 0, 7, 2, 8, 4];

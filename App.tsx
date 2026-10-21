@@ -15,10 +15,10 @@ import { DotField, LangCtx, ThemeCtx } from './src/ui';
 import { Home } from './src/Home';
 import { Grid, Talk } from './src/Photos';
 import { Entry } from './src/Entry';
-import { Archive, Settings } from './src/Screens';
+import { Archive, Insights, Settings } from './src/Screens';
 
 type Mode = 'light' | 'dark' | 'auto';
-type Pane = null | 'grid' | 'talk' | 'entry' | 'archive' | 'settings';
+type Pane = null | 'grid' | 'talk' | 'entry' | 'archive' | 'insights' | 'settings';
 
 /* One screen: home is the writing window; photos, the day page, look back and settings slide over it. */
 export default function App() {
@@ -31,7 +31,6 @@ export default function App() {
   const [mode, setModeState] = useState<Mode>('auto');
   const [lang, setLangState] = useState<Lang>('zh');
   const [pane, setPane] = useState<Pane>(null);
-  const [tab, setTab] = useState<'week' | 'month'>('week');
   const [photos, setPhotos] = useState<Pic[]>([]);
   const [groups, setGroups] = useState<number[][]>([]);
   const [said, setSaid] = useState<Said[]>([]);
@@ -99,7 +98,8 @@ export default function App() {
                 <Talk open={pane === 'talk'} photos={photos} groups={groups} onBack={() => setPane('grid')} onRecord={rec}
                   onDone={(x) => { setSaid((s) => [...s, x]); setPane('entry'); }} />
                 <Entry open={pane === 'entry'} onClose={() => setPane(null)} onArchive={() => setPane('archive')} voiceUri={voiceUri} photos={photos} said={said} />
-                <Archive open={pane === 'archive'} tab={tab} setTab={setTab} onClose={() => setPane(null)} onEntry={() => setPane('entry')} />
+                <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={() => setPane('entry')} onInsights={() => setPane('insights')} />
+                <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
                 <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} />
               </>
             )}
