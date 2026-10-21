@@ -46,6 +46,7 @@ const zh = {
   file: '收进今天',
   /* --- new direction --- */
   hi: (night: boolean): string => night ? '晚上好' : '下午好', ask0: '今天过得\n怎么样？', bubbleMore: '下午说过一段，接着说？', bubbleNone: '说一句也好',
+  photoHow: '按编号说说每张照片就好，比如“一号是……，三到六号是……”，我们会对上号。',
   tapOrHold: '点一下或按住', camera: '拍照', library: '相册', layoutBtn: '排版', making: '正在排版', recTap: (mm: string) => `正在听 ${mm}，再点一下结束`, recHold: (mm: string) => `松手就结束 ${mm}`, nSaid: (n: number) => `说了 ${n} 段`,
   tapTalk: '点一下说话', holdToo: '按住也行，松手就结束', saidDone: '说完了', tapToEnd: '点一下就结束，左边是不要这段',
   releaseEnd: '松手就结束', slideCancel: '手指往上滑开就是不要这段', listening: '正在听', holding: '按住中', orPhotos: '或者先选几张照片，照着说',
@@ -146,6 +147,7 @@ const en: typeof zh = {
   file: 'Add to today',
   /* --- new direction --- */
   hi: (night) => night ? 'Good evening' : 'Good afternoon', ask0: 'How was\nyour day?', bubbleMore: 'You talked this afternoon. Carry on?', bubbleNone: 'Even one sentence is enough',
+  photoHow: 'Just describe each photo by its number, like “Number one is…, three to six are…”. We’ll match them up.',
   tapOrHold: 'Tap or hold', camera: 'Take a photo', library: 'Photo library', layoutBtn: 'Lay out', making: 'Laying out the page', recTap: (mm) => `Listening ${mm}. Tap again to finish`, recHold: (mm) => `Let go to finish ${mm}`, nSaid: (n) => `${n} note${n === 1 ? '' : 's'}`,
   tapTalk: 'Tap to talk', holdToo: 'Or hold, and let go to finish', saidDone: 'Done', tapToEnd: 'Tap to finish. The left button discards it',
   releaseEnd: 'Let go to finish', slideCancel: 'Slide up to discard', listening: 'Listening', holding: 'Holding', orPhotos: 'Or pick some photos and talk about them',

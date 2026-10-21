@@ -13,12 +13,12 @@ import { Pic, Said } from './src/session';
 import { dark as darkT, light as lightT } from './src/theme';
 import { DotField, LangCtx, ThemeCtx } from './src/ui';
 import { Home } from './src/Home';
-import { Grid, Talk } from './src/Photos';
+import { Grid } from './src/Photos';
 import { Entry } from './src/Entry';
 import { Archive, Insights, Settings } from './src/Screens';
 
 type Mode = 'light' | 'dark' | 'auto';
-type Pane = null | 'grid' | 'talk' | 'entry' | 'archive' | 'insights' | 'settings';
+type Pane = null | 'grid' | 'entry' | 'archive' | 'insights' | 'settings';
 
 /* One screen: home is the writing window; photos, the day page, look back and settings slide over it. */
 export default function App() {
@@ -113,10 +113,9 @@ export default function App() {
                 <Home hidden={pane !== null} night={h >= 18 || h < 5} photos={photos} said={said} laid={laid} making={making}
                   onCamera={shoot} onPick={() => (photos.length ? setPane('grid') : pick(false))} onOpen={setPane} onRecord={rec}
                   onSaved={(text) => setSaid((x) => [...x, { kind: 'talk', text }])} onLayout={layout} />
-                <Grid open={pane === 'grid' || pane === 'talk'} photos={photos} groups={groups} setGroups={setGroups}
-                  onBack={() => setPane(null)} onMore={() => pick(true)} onTalk={() => setPane('talk')} />
-                <Talk open={pane === 'talk'} photos={photos} groups={groups} onBack={() => setPane('grid')} onCamera={shoot} onMore={() => pick(true)} onRecord={rec}
-                  onDone={(x) => { setSaid((s) => [...s, x]); setPane(null); }} />
+                <Grid open={pane === 'grid'} photos={photos} groups={groups} setGroups={setGroups} onBack={() => setPane(null)}
+                  onCamera={shoot} onMore={() => pick(true)} onRecord={rec}
+                  onDone={(x) => { setSaid((s) => [...s, x]); setTimeout(() => setPane(null), 700); }} />
                 <Entry open={pane === 'entry'} onClose={() => setPane(null)} onArchive={() => setPane('archive')} voiceUri={voiceUri} />
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={() => setPane('entry')} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />

@@ -133,7 +133,7 @@ export function TalkKey({ left, right, onStart, onStop, onCancel, state, setStat
   const pulse = useState(() => new Animated.Value(1))[0];
   useEffect(() => {
     if (state === 'tap' || state === 'hold') {
-      const a = Animated.loop(Animated.sequence([Animated.timing(pulse, { toValue: 1.08, duration: 600, easing: EASE, useNativeDriver: true }), Animated.timing(pulse, { toValue: 1, duration: 600, easing: EASE, useNativeDriver: true })]));
+      const a = Animated.loop(Animated.sequence([Animated.timing(pulse, { toValue: 1.3, duration: 600, easing: EASE, useNativeDriver: true }), Animated.timing(pulse, { toValue: 1, duration: 600, easing: EASE, useNativeDriver: true })]));
       a.start(); return () => a.stop();
     }
     Animated.timing(pulse, { toValue: 1, duration: 200, useNativeDriver: true }).start();
@@ -161,7 +161,9 @@ export function TalkKey({ left, right, onStart, onStop, onCancel, state, setStat
           ? <Round icon="close" label={S.cancel} size={SZ.key} onPress={onCancel} />
           : <Round icon={left.icon} label={left.label} size={SZ.key} onPress={recording ? undefined : left.onPress} dim={recording} />}
         <Pressable onPressIn={pressIn} onPressOut={pressOut} accessibilityRole="button" accessibilityLabel={under} hitSlop={10}>
-          <Animated.View style={[s.circle, { backgroundColor: recording ? t.red : t.pill, transform: [{ scale: pulse }] }]} />
+          <View style={[s.circle, { backgroundColor: t.pill }]}>
+            <Animated.View style={[s.core, { backgroundColor: t.red, transform: [{ scale: pulse }] }]} />
+          </View>
         </Pressable>
         <Round icon={right.icon} label={right.label} size={SZ.key} onPress={recording ? undefined : right.onPress} dim={recording} />
       </View>
@@ -189,6 +191,7 @@ export const s = StyleSheet.create({
   topLbl: { fontSize: 17, fontWeight: '500' },
   keyWrap: { alignItems: 'center', gap: 10 },
   keyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 },
-  circle: { width: SZ.talk, height: SZ.talk, borderRadius: SZ.talk / 2 },
+  circle: { width: SZ.talk, height: SZ.talk, borderRadius: SZ.talk / 2, alignItems: 'center', justifyContent: 'center' },
+  core: { width: 22, height: 22, borderRadius: 11 },
   under: { fontSize: 12.5, height: 18, fontVariant: ['tabular-nums'] },
 });
