@@ -33,11 +33,11 @@ function Mosaic({ pics, w, h, r }: { pics: Pic[]; w: number; h: number; r: numbe
   );
 }
 
-function Badge({ text, big }: { text: string; big?: boolean }) {
+function Badge({ text, big, mid }: { text: string; big?: boolean; mid?: boolean }) {
   const t = useT();
   return (
-    <View style={[g.badge, big && g.badgeBig, { backgroundColor: t.dark ? 'rgba(18,18,17,0.82)' : 'rgba(255,255,255,0.94)' }]}>
-      <Text style={{ color: t.ink, fontSize: big ? 13 : 11.5, fontVariant: ['tabular-nums'] }}>{text}</Text>
+    <View style={[g.badge, mid && g.badgeMid, big && g.badgeBig, { backgroundColor: t.dark ? 'rgba(18,18,17,0.82)' : 'rgba(255,255,255,0.94)' }]}>
+      <Text style={{ color: t.ink, fontSize: big ? 13 : mid ? 12.5 : 11.5, fontVariant: ['tabular-nums'] }}>{text}</Text>
     </View>
   );
 }
@@ -55,10 +55,18 @@ export function Grid({ open, photos, groups, setGroups, onBack, onMore, onTalk }
   const W = Dimensions.get('window').width;
   const [select, setSelect] = useState(false);
   const [sel, setSel] = useState<number[]>([]);
-  const pad = 8, gap = SZ.tileGap, wx = 14;
-  const tile = (W - wx * 2 - pad * 2 - gap * 4) / 5;
-  const winH = pad + 3 * (tile + gap) + tile * 0.5;
   const units = unitsOf(photos.length, groups);
+  /* few photos stay big: three across up to three photos, four across up to eight, then five */
+  const cols = photos.length <= 3 ? 3 : photos.length <= 8 ? 4 : 5;
+  /* count rows the way flex-wrap lays them out: a group takes two cells and moves down if it doesn't fit */
+  let rows = units.length ? 1 : 0, used = 0;
+  units.forEach((u) => { const w = u.idx.length > 1 ? 2 : 1; if (used + w > cols) { rows++; used = 0; } used += w; });
+  /* only past three rows do the photos go into a white window that scrolls, showing three and a half rows */
+  const win = rows > 3;
+  const gap = SZ.tileGap, pad = win ? 8 : 0, wx = win ? 14 : SZ.px;
+  const tile = (W - wx * 2 - pad * 2 - gap * (cols - 1)) / cols;
+  const r = tile > 90 ? 14 : SZ.tileR;
+  const winH = win ? pad + 3 * (tile + gap) + tile * 0.5 : rows * tile + (rows - 1) * gap;
   const grouped = new Set(groups.flat());
 
   function toggle(i: number) { setSel((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i])); }
@@ -73,23 +81,23 @@ export function Grid({ open, photos, groups, setGroups, onBack, onMore, onTalk }
           : <Pressable onPress={() => setSelect(true)}><Text style={[g.txt, { color: t.mut }]}>{S.groupBtn}</Text></Pressable>}
       </View>
 
-      <View style={[g.win, { top: ins.top + 60, left: wx, right: wx, height: winH, backgroundColor: t.panel, borderRadius: SZ.panelR }]}>
-        <ScrollView contentContainerStyle={{ padding: pad, flexDirection: 'row', flexWrap: 'wrap', gap }} showsVerticalScrollIndicator={false}>
+      <View style={[g.win, { top: ins.top + 60, left: wx, right: wx, height: winH }, win && { backgroundColor: t.panel, borderRadius: SZ.panelR }]}>
+        <ScrollView scrollEnabled={win} contentContainerStyle={{ padding: pad, flexDirection: 'row', flexWrap: 'wrap', gap }} showsVerticalScrollIndicator={false}>
           {units.map((u) => {
             if (u.idx.length > 1) {
               return (
                 <View key={'g' + u.idx[0]} style={{ opacity: select ? 0.5 : 1 }}>
-                  <Mosaic pics={u.idx.map((i) => photos[i])} w={tile * 2 + gap} h={tile} r={SZ.tileR} />
-                  <Badge text={label(u)} />
+                  <Mosaic pics={u.idx.map((i) => photos[i])} w={tile * 2 + gap} h={tile} r={r} />
+                  <Badge text={label(u)} mid={tile > 90} />
                 </View>
               );
             }
             const i = u.idx[0], on = sel.includes(i);
             return (
               <Pressable key={i} disabled={!select || grouped.has(i)} onPress={() => toggle(i)} style={{ width: tile, height: tile }}>
-                <Image source={src(photos[i])} contentFit="cover" style={{ width: tile, height: tile, borderRadius: SZ.tileR }} />
-                <Badge text={String(i + 1)} />
-                {on ? <><View style={[StyleSheet.absoluteFill, { borderRadius: SZ.tileR, borderWidth: 2.5, borderColor: t.ink }]} />
+                <Image source={src(photos[i])} contentFit="cover" style={{ width: tile, height: tile, borderRadius: r }} />
+                <Badge text={String(i + 1)} mid={tile > 90} />
+                {on ? <><View style={[StyleSheet.absoluteFill, { borderRadius: r, borderWidth: 2.5, borderColor: t.ink }]} />
                   <View style={[g.check, { backgroundColor: t.ink }]}><Svg width={16} height={16} viewBox="0 0 16 16"><Path d="M4.5 8.2l2.3 2.3 4.7-4.9" stroke={t.b} strokeWidth={1.8} fill="none" strokeLinecap="round" strokeLinejoin="round" /></Svg></View></> : null}
               </Pressable>
             );
@@ -218,6 +226,7 @@ const g = StyleSheet.create({
   txt: { fontSize: 14 },
   win: { position: 'absolute', overflow: 'hidden' },
   badge: { position: 'absolute', left: 3, bottom: 3, minWidth: 17, height: 17, paddingHorizontal: 4, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  badgeMid: { left: 7, bottom: 7, height: 22, minWidth: 22, paddingHorizontal: 7, borderRadius: 11 },
   badgeBig: { left: 10, bottom: 10, height: 28, minWidth: 28, paddingHorizontal: 10, borderRadius: 14 },
   check: { position: 'absolute', right: 4, top: 4, width: 16, height: 16, borderRadius: 8 },
   how: { position: 'absolute', left: 20, right: 20, alignItems: 'center' },
