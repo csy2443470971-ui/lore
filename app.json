@@ -11,7 +11,8 @@
       "bundleIdentifier": "app.quietjournal.ios",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "按住红点说话时，用麦克风录下你的声音。"
-      }
+      },
+      "runtimeVersion": "exposdk:57.0.0"
     },
     "android": {
       "adaptiveIcon": {
@@ -21,7 +22,17 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "app.quietjournal"
+      "package": "app.quietjournal",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -44,6 +55,15 @@
           "cameraPermission": "拍一张照片放进今天的日记。"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "559a7d77-59e4-4b1c-89fc-eeaf9ca4c885"
+      }
+    },
+    "owner": "siennachen",
+    "updates": {
+      "url": "https://u.expo.dev/559a7d77-59e4-4b1c-89fc-eeaf9ca4c885"
+    }
   }
 }
