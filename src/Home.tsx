@@ -52,7 +52,7 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
   function start() {
     onRecord.start();
     if (showTray && pending.length) {
-      /* demo: as you go "one is…, two is…", the matching photo lights up */
+      /* demo: the person goes "one is…, two is…"; which photo each sentence belongs to is only settled at Lay out */
       setMode('photos'); setLines({}); setK(pending[0]);
       let j = 0;
       tick.current = setInterval(() => {
@@ -118,15 +118,15 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
                   <Text style={{ fontSize: 13.5, color: select ? t.ink : t.mut, opacity: recording ? 0.35 : 1 }}>{select ? S.cancel : S.groupBtn}</Text>
                 </Pressable>
               </View>
-              <Tray photos={photos} groups={groups} width={W - 2 * SZ.px} select={select} sel={sel} onToggle={toggle} cur={livePhotos ? k : -1} />
+              <Tray photos={photos} groups={groups} width={W - 2 * SZ.px} select={select} sel={sel} onToggle={toggle} cur={-1} />
               {select ? <Text style={[h.hint, { color: t.mut }]}>{S.selHow}</Text>
-                : pending.length && !recording ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>{S.photoHow}</Text> : null}
+                : !said.length && !recording ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>{S.photoHow}</Text> : null}
             </View>
           ) : null}
 
-          {unlaid.length ? <Stream items={unlaid} photos={photos} /> : null}
+          {unlaid.length ? <Stream items={unlaid} /> : null}
 
-          {livePhotos && reached.length ? <Stream items={[{ kind: 'photos', parts: reached.map((n) => ({ unit: units[n], text: lines[n] || line(n) })) }]} photos={photos} /> : null}
+          {livePhotos && reached.length ? <Stream items={[{ kind: 'photos', parts: reached.map((n) => ({ unit: units[n], text: lines[n] || line(n) })) }]} /> : null}
           {liveTalk ? (
             <Text style={tx}>
               {raw.slice(0, shown).map((w, i) => {

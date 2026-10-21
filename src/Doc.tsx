@@ -1,13 +1,12 @@
 import React from 'react';
 import { Dimensions, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
-import { Badge, Mosaic } from './Photos';
-import { Pic, Said, Unit } from './session';
+import { Mosaic } from './Photos';
+import { Pic, Said } from './session';
 import { SZ } from './theme';
 import { useFace, useLang, useS, useT } from './ui';
 
 const src = (p: Pic) => (p.uri ? { uri: p.uri } : p.asset);
-const tagOf = (u: Unit) => (u.idx.length > 1 ? `${u.idx[0] + 1}–${u.idx[u.idx.length - 1] + 1}` : String(u.idx[0] + 1));
 
 function useTx() {
   const t = useT();
@@ -16,25 +15,17 @@ function useTx() {
   return [zh ? d.tx : d.txEn, { color: t.ink, fontFamily: face.body }];
 }
 
-/* Before layout: only the tidied words, and the photos they were said about, in the order they were said. */
-export function Stream({ items, photos }: { items: Said[]; photos: Pic[] }) {
+/* Before layout: only the tidied words, in the order they were said. Photos aren't matched to sentences yet;
+   the spoken numbers ("one is…") stay in the text and are matched to photos at Lay out. */
+export function Stream({ items }: { items: Said[] }) {
+  const S = useS();
   const tx = useTx();
   return (
     <View style={{ gap: 16 }}>
-      {items.map((x, i) => x.kind === 'talk' ? <Text key={i} style={tx}>{x.text}</Text> : (
-        <View key={i} style={{ gap: 12 }}>
-          {x.parts.map((p, j) => (
-            <View key={j} style={d.row}>
-              <View>
-                {p.unit.idx.length > 1
-                  ? <Mosaic pics={p.unit.idx.map((k) => photos[k]).filter(Boolean)} w={52} h={52} r={SZ.tileR} />
-                  : photos[p.unit.idx[0]] ? <Image source={src(photos[p.unit.idx[0]])} contentFit="cover" style={d.th} /> : null}
-                <Badge text={tagOf(p.unit)} />
-              </View>
-              <Text style={[tx, { flex: 1 }]}>{p.text}</Text>
-            </View>
-          ))}
-        </View>
+      {items.map((x, i) => (
+        <Text key={i} style={tx}>
+          {x.kind === 'talk' ? x.text : x.parts.map((p) => S.rangeWord(p.unit.idx[0] + 1, p.unit.idx[p.unit.idx.length - 1] + 1, S.numWord) + S.is + p.text).join(S.is === '是' ? '' : ' ')}
+        </Text>
       ))}
     </View>
   );
@@ -76,8 +67,6 @@ export function Page({ items, photos }: { items: Said[]; photos: Pic[] }) {
 const d = StyleSheet.create({
   tx: { fontSize: 16, lineHeight: 29 },
   txEn: { fontSize: 17.5, lineHeight: 27 },
-  row: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
-  th: { width: 52, height: 52, borderRadius: SZ.tileR },
   page: { borderRadius: SZ.panelR, padding: 20 },
   cover: { height: 120, borderRadius: SZ.panelR - 8, marginBottom: 18 },
   title: { fontSize: 25, lineHeight: 35 },
