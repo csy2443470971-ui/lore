@@ -1,58 +1,63 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Circle, Path } from 'react-native-svg';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Layout, parseAsk } from './data';
 import { PHOTO } from './images';
-import { F } from './theme';
-import { Icon, Meta, Panel, Ring, s as us, useFace, useLang, useS, useT } from './ui';
+import { Pic, Said } from './session';
+import { F, SZ } from './theme';
+import { Icon, Meta, Panel, Round, s as us, useFace, useLang, useS, useT } from './ui';
 
-const BARS = [5, 9, 6, 12, 8, 14, 7, 10, 4, 11, 13, 6, 9, 5, 12, 8, 6, 10, 7, 4];
+const src = (p: Pic) => (p.uri ? { uri: p.uri } : p.asset);
 
-function Fig({ p, ratio, cap, bleed }: { p: string; ratio: number; cap?: string; bleed?: boolean }) {
+/* one property line: icon, name, value — like the top of a Notion page */
+function Prop({ icon, k, v }: { icon: 'cal' | 'pin' | 'mic' | 'photo'; k: string; v: string }) {
+  const t = useT();
   return (
-    <View style={[{ gap: 8, flex: 1 }, bleed && { marginHorizontal: -24 }]}>
-      <Image source={PHOTO[p]} style={{ width: '100%', aspectRatio: ratio, borderRadius: bleed ? 0 : 3 }} contentFit="cover" transition={300} />
-      {cap ? <Meta style={[{ fontSize: 12.5 }, bleed && { paddingHorizontal: 24 }]}>{cap}</Meta> : null}
+    <View style={st.prop}>
+      <Icon name={icon} color={t.mut} size={14} />
+      <Text style={[st.propK, { color: t.mut }]}>{k}</Text>
+      <Text style={[st.propV, { color: t.ink }]}>{v}</Text>
     </View>
   );
 }
 
-/* The day's walk: a dotted line between two named places, labels in plain text below. */
-function Route() {
+/* a group of photos: up to four in a 2×2 block, with its number range in the corner */
+function Group({ pics, tag }: { pics: Pic[]; tag?: string }) {
   const t = useT();
-  const S = useS();
   return (
-    <View style={{ gap: 6 }}>
-      <Svg width="100%" height={60} viewBox="0 0 300 60" preserveAspectRatio="none">
-        <Path d="M6 48 C 60 50, 70 12, 120 18 S 190 54, 230 32 S 270 8, 294 12" stroke={t.pInk} strokeWidth={1} strokeDasharray="2 3" fill="none" />
-        <Circle cx={6} cy={48} r={3} fill={t.pInk} />
-        <Circle cx={294} cy={12} r={3} fill={t.pInk} />
-      </Svg>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Meta>{S.routeFrom}</Meta><Meta>{S.routeLen}</Meta><Meta>{S.routeTo}</Meta>
+    <View style={st.mos}>
+      {pics.slice(0, 4).map((p, i) => <Image key={i} source={src(p)} contentFit="cover" style={st.mosI} />)}
+      {tag ? <View style={[st.tag, { backgroundColor: t.dark ? 'rgba(18,18,17,0.82)' : 'rgba(255,255,255,0.95)' }]}><Text style={{ fontSize: 12, color: t.ink }}>{tag}</Text></View> : null}
+    </View>
+  );
+}
+
+/* one big photo on the left, two stacked on the right */
+function Three({ pics }: { pics: Pic[] }) {
+  return (
+    <View style={st.three}>
+      <Image source={src(pics[0])} contentFit="cover" style={[st.r, { flex: 2 }]} />
+      <View style={{ flex: 1, gap: SZ.tileGap }}>
+        <Image source={src(pics[1])} contentFit="cover" style={[st.r, { flex: 1 }]} />
+        <Image source={src(pics[2])} contentFit="cover" style={[st.r, { flex: 1 }]} />
       </View>
     </View>
   );
 }
 
-export function Entry({ open, onClose, onArchive, voiceUri }: { open: boolean; onClose: () => void; onArchive: () => void; voiceUri: string | null }) {
+export function Entry({ open, onClose, onArchive, voiceUri, photos, said }: {
+  open: boolean; onClose: () => void; onArchive: () => void; voiceUri: string | null; photos: Pic[]; said: Said[];
+}) {
   const t = useT();
   const S = useS();
   const face = useFace();
   const zh = useLang() === 'zh';
   const ins = useSafeAreaInsets();
-  const [layout, setLayout] = useState<Layout>('mix');
-  const [prev, setPrev] = useState<Layout | null>(null);
-  const [log, setLog] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [q, setQ] = useState('');
   const [kb, setKb] = useState(0);
-  const fade = useState(() => new Animated.Value(1))[0];
-  const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const [fold, setFold] = useState(false);
   const player = useAudioPlayer(voiceUri ?? undefined);
   const status = useAudioPlayerStatus(player);
 
@@ -62,100 +67,86 @@ export function Entry({ open, onClose, onArchive, voiceUri }: { open: boolean; o
     return () => { a.remove(); b.remove(); };
   }, []);
 
-  function apply(to: Layout, undo = false) {
-    if (to === layout || busy) return;
-    setBusy(true); setLog(null);
-    Animated.timing(fade, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
-      setPrev(undo ? null : layout); setLayout(to);
-      scroll.current?.scrollTo({ y: 0, animated: true });
-      Animated.timing(fade, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-      setLog(undo ? null : S.done[to]); setBusy(false);
-    });
-  }
-  function submit() {
-    const v = q.trim(); if (!v) return;
-    setQ(''); Keyboard.dismiss();
-    const to = parseAsk(v);
-    if (to) apply(to); else { setPrev(null); setLog(S.notLearned); }
-  }
   function togglePlay() {
     if (!voiceUri) return;
     if (status.playing) player.pause(); else { if (status.didJustFinish || status.currentTime >= status.duration) player.seekTo(0); player.play(); }
   }
 
-  const tx = [zh ? st.tx : st.txEn, { color: t.pInk, fontFamily: face.body }];
-  const body = {
-    mix: (<>
-      <Text style={tx}>{S.t1}</Text>
-      <View style={st.row}><View style={{ flex: 3 }}><Fig p="cafe" ratio={3 / 4} cap={S.cap.cafe} /></View><View style={{ flex: 2 }}><Fig p="latte" ratio={1} cap={S.cap.latte} /></View></View>
-      <Text style={tx}>{S.t2}</Text>
-      <Fig p="sunset" ratio={4 / 3} cap={S.cap.sunset} bleed />
-      <Route />
-      <Text style={[tx, { color: t.pMuted }]}>{S.t3}</Text>
-    </>),
-    big: (<>
-      <Fig p="sunset" ratio={4 / 5} cap={S.cap.sunset} bleed />
-      <Text style={tx}>{S.t1}</Text>
-      <Text style={tx}>{S.t2}</Text>
-      <View style={st.row}><Fig p="cafe" ratio={1} /><Fig p="latte" ratio={1} /><Fig p="causeway" ratio={1} /></View>
-    </>),
-    quote: (<>
-      <Text style={[zh ? st.big : st.bigEn, { color: t.pInk, fontFamily: face.body }]}>{S.bigQuote}</Text>
-      <Meta>{S.quoteSrc}</Meta>
-      <Fig p="sunset" ratio={16 / 10} />
-    </>),
-    time: (<>
-      {([['14:10', S.t1, 'cafe'], ['17:42', S.t2, 'sunset'], ['19:05', S.t3, 'osmanthus']] as const).map(([tm, txt, p]) => (
-        <View key={tm} style={st.tl}>
-          <Text style={[st.tlTime, { color: t.pInk, borderTopColor: t.pInk }]}>{tm}</Text>
-          <View style={{ flex: 1, gap: 12 }}><Text style={tx}>{txt}</Text><Fig p={p} ratio={16 / 10} /></View>
-        </View>
-      ))}
-    </>),
-  }[layout];
+  const tx = [zh ? st.tx : st.txEn, { color: t.ink, fontFamily: face.body }];
+  const sample: Pic[] = [PHOTO.cafe, PHOTO.latte, PHOTO.causeway, PHOTO.sunset, PHOTO.osmanthus, PHOTO.noodles, PHOTO.lanterns, PHOTO.hotpot].map((a) => ({ asset: a }));
+  const nPics = photos.length || 12;
+  const cover = photos[0] || { asset: PHOTO.sunset };
+  const tagOf = (idx: number[]) => (idx.length > 1 ? `${idx[0] + 1}–${idx[idx.length - 1] + 1}` : String(idx[0] + 1));
 
   return (
     <Panel open={open} onBack={onClose}
-      top={<><Ring icon="down" label={S.back} onPress={onClose} /><Text style={[us.topLbl, { color: t.ink }]}>{S.today}</Text><Ring icon="list" label={S.archive} onPress={onArchive} /></>}
+      top={<><Round icon="down" label={S.back} onPress={onClose} /><Text style={[us.topLbl, { color: t.ink }]}>{S.today}</Text><Round icon="list" label={S.archive} onPress={onArchive} /></>}
       footer={
         <View style={[st.ask, { paddingBottom: Math.max(ins.bottom, 12) + 4, transform: [{ translateY: kb ? -kb + ins.bottom : 0 }] }]}>
-          <LinearGradient colors={['transparent', t.paperSolid]} locations={[0, 0.5]} style={StyleSheet.absoluteFill} pointerEvents="none" />
-          <View style={st.sugg}>
-            {log ? (
-              <View style={{ flexDirection: 'row', gap: 14, flexWrap: 'wrap', flex: 1 }}>
-                <Text style={{ fontSize: 13.5, color: t.pInk, flexShrink: 1 }}>{log}</Text>
-                {prev ? <Pressable onPress={() => apply(prev, true)}><Text style={{ fontSize: 13.5, color: t.pInk, textDecorationLine: 'underline' }}>{S.undo}</Text></Pressable> : null}
-              </View>
-            ) : busy ? <Text style={{ fontSize: 13.5, color: t.pMuted }}>{S.reflowing}</Text> : S.sugg.filter(([, l]) => l !== layout).map(([label, l]) => (
-              <Pressable key={l} onPress={() => apply(l)} hitSlop={8}><Text style={{ fontSize: 13.5, color: t.pMuted }}>{label}</Text></Pressable>
-            ))}
-          </View>
-          <View style={[st.field, { backgroundColor: t.paperSolid, borderColor: t.pLine }]}>
-            <TextInput value={q} onChangeText={setQ} onSubmitEditing={submit} returnKeyType="send" placeholder={S.askPh} placeholderTextColor={t.pMuted}
-              style={[st.input, { color: t.pInk }]} />
-            <Pressable accessibilityLabel={S.speak} style={st.mic}><Icon name="mic" color={t.pMuted} /></Pressable>
-            <Pressable accessibilityLabel={S.ask} onPress={submit} style={[st.go, { backgroundColor: t.pInk }]}><Icon name="up" color={t.paperSolid} /></Pressable>
+          <LinearGradient colors={[t.dark ? 'rgba(30,29,27,0)' : 'rgba(255,255,255,0)', t.panel]} locations={[0, 0.5]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <View style={[st.field, { backgroundColor: t.b }]}>
+            <TextInput value={q} onChangeText={setQ} onSubmitEditing={() => { setQ(''); Keyboard.dismiss(); }} returnKeyType="send" placeholder={S.askPh} placeholderTextColor={t.mut}
+              style={[st.input, { color: t.ink }]} />
+            <Pressable accessibilityLabel={S.speak} style={st.mic}><Icon name="mic" color={t.mut} /></Pressable>
+            <Pressable accessibilityLabel={S.ask} onPress={() => { setQ(''); Keyboard.dismiss(); }} style={[st.go, { backgroundColor: t.pill }]}><Icon name="up" color={t.pillText} /></Pressable>
           </View>
         </View>
       }>
-      <ScrollView ref={scroll} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ padding: 24, paddingTop: 28, paddingBottom: 180 }} showsVerticalScrollIndicator={false}>
-        <Meta>{S.place}</Meta>
-        <Text style={[zh ? st.title : st.titleEn, { color: t.pInk, fontFamily: face.title }]}>{S.todayTitle}</Text>
-        <Text style={[st.quote, { color: t.pMuted, fontFamily: face.italic }]}>{S.quote}</Text>
-        <View style={st.voiceRow}>
-          <Pressable onPress={togglePlay} style={[st.voice, { borderColor: t.pLine }]} accessibilityRole="button">
-            <View style={[st.play, { backgroundColor: t.pInk }]}><Text style={{ color: t.paperSolid, fontSize: 9 }}>{status.playing ? '❚❚' : '▶'}</Text></View>
-            <View style={st.bars}>{BARS.map((v, i) => <View key={i} style={{ width: 2, height: v, borderRadius: 1, backgroundColor: status.playing ? t.pInk : t.pFaint }} />)}</View>
-            <Text style={{ fontSize: 13, color: t.pInk }}>{voiceUri ? S.playNew : S.playVoice}</Text>
-          </Pressable>
+      <ScrollView keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ padding: SZ.px, paddingTop: 18, paddingBottom: 160 }} showsVerticalScrollIndicator={false}>
+        <Image source={src(cover)} contentFit="cover" style={st.cover} />
+        <Text style={[zh ? st.title : st.titleEn, { color: t.ink, fontFamily: face.title }]}>{S.todayTitle}</Text>
+        <View style={st.props}>
+          <Prop icon="cal" k={S.pDate} v={S.date} />
+          <Prop icon="pin" k={S.pPlace} v={S.place} />
+          <Prop icon="mic" k={S.pSaid} v={S.voiceLen} />
+          <Prop icon="photo" k={S.pPhotos} v={S.nPhotos(nPics, 0)} />
         </View>
-        <Meta style={{ marginTop: 10 }}>{S.voiceLen}</Meta>
-        <Animated.View style={{ marginTop: 28, gap: 20, opacity: fade }}>{body}</Animated.View>
-        <View style={[st.stats, { borderTopColor: t.pLine }]}>
-          {S.stats.map(([n, l]) => (
-            <View key={l} style={{ flex: 1, gap: 2 }}><Text style={[st.num, { color: t.pInk }]}>{n}</Text><Meta style={{ fontSize: 12.5 }}>{l}</Meta></View>
-          ))}
+
+        {voiceUri ? (
+          <Pressable onPress={togglePlay} style={[st.voice, { backgroundColor: t.b }]} accessibilityRole="button">
+            <View style={[st.play, { backgroundColor: t.pill }]}><Text style={{ color: t.pillText, fontSize: 9 }}>{status.playing ? '❚❚' : '▶'}</Text></View>
+            <Text style={{ fontSize: 13.5, color: t.ink }}>{S.playNew}</Text>
+          </Pressable>
+        ) : null}
+
+        {/* what was said just now, newest first */}
+        {said.slice().reverse().map((x, i) => x.kind === 'talk' ? (
+          <View key={'s' + i} style={st.block}><Meta style={{ marginBottom: 4 }}>{S.justNow}</Meta><Text style={tx}>{x.text}</Text></View>
+        ) : (
+          <View key={'s' + i} style={st.block}>
+            <Meta style={{ marginBottom: 6 }}>{S.justNow}</Meta>
+            {x.parts.map((p, j) => (
+              <View key={j} style={{ gap: 10, marginBottom: 14 }}>
+                {p.unit.idx.length > 1 ? <Group pics={p.unit.idx.map((k) => photos[k]).filter(Boolean)} tag={tagOf(p.unit.idx)} />
+                  : photos[p.unit.idx[0]] ? <Image source={src(photos[p.unit.idx[0]])} contentFit="cover" style={st.one} /> : null}
+                <Text style={tx}>{p.text}</Text>
+              </View>
+            ))}
+          </View>
+        ))}
+
+        {/* the sample day */}
+        <View style={st.block}>
+          <Group pics={sample.slice(0, 4)} tag="3–6" />
+          <Text style={tx}>{S.t1}</Text>
+        </View>
+        <View style={st.block}>
+          <Three pics={[sample[3], sample[4], sample[1]]} />
+          <Text style={tx}>{S.t2}</Text>
+        </View>
+        <Text style={[tx, { color: t.mut }]}>{S.t3}</Text>
+
+        <Pressable onPress={() => setFold(!fold)} style={st.fold}>
+          <Icon name={fold ? 'down' : 'chev'} color={t.mut} size={14} />
+          <Text style={{ fontSize: 14, color: t.ink }}>{S.foldMore(5)}</Text>
+          <View style={st.mini}>{sample.slice(4, 8).map((p, i) => <Image key={i} source={src(p)} contentFit="cover" style={[st.miniI, { borderColor: t.panel }]} />)}</View>
+        </Pressable>
+        {fold ? <View style={st.foldGrid}>{sample.slice(3, 8).map((p, i) => <Image key={i} source={src(p)} contentFit="cover" style={st.foldI} />)}</View> : null}
+
+        <View style={[st.callout, { backgroundColor: t.b }]}>
+          <Text style={{ fontSize: 15 }}>✦</Text>
+          <Text style={{ flex: 1, fontSize: 13.5, lineHeight: 21, color: t.mut }}>{S.callout}</Text>
         </View>
       </ScrollView>
       {/* while the keyboard is up, a tap anywhere on the page puts it away */}
@@ -165,26 +156,35 @@ export function Entry({ open, onClose, onArchive, voiceUri }: { open: boolean; o
 }
 
 export const st = StyleSheet.create({
-  title: { fontSize: 28, lineHeight: 40, marginTop: 8 },
-  titleEn: { fontSize: 32, lineHeight: 38, marginTop: 8, letterSpacing: -0.3 },
-  quote: { fontSize: 17, lineHeight: 26, marginTop: 6, marginBottom: 18 },
-  voiceRow: { flexDirection: 'row' },
-  voice: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 6, paddingRight: 16, borderRadius: 999, borderWidth: 1 },
+  cover: { height: 112, borderRadius: SZ.panelR - 8, marginBottom: 18 },
+  title: { fontSize: 26, lineHeight: 36 },
+  titleEn: { fontSize: 30, lineHeight: 36, letterSpacing: -0.3 },
+  props: { marginTop: 14, marginBottom: 22, gap: 9 },
+  prop: { flexDirection: 'row', alignItems: 'center' },
+  propK: { width: 54, marginLeft: 9, fontSize: 13.5 },
+  propV: { flex: 1, fontSize: 13.5 },
+  voice: { flexDirection: 'row', alignSelf: 'flex-start', alignItems: 'center', gap: 10, padding: 6, paddingRight: 16, borderRadius: 999, marginBottom: 20 },
   play: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  bars: { flexDirection: 'row', gap: 2, alignItems: 'center', height: 14 },
-  tx: { fontSize: 16, lineHeight: 30 },
-  txEn: { fontSize: 18, lineHeight: 28 },
-  row: { flexDirection: 'row', gap: 10, alignItems: 'flex-end' },
-  big: { fontSize: 30, lineHeight: 46, marginTop: 6 },
-  bigEn: { fontSize: 34, lineHeight: 40, marginTop: 6, letterSpacing: -0.4 },
-  tl: { flexDirection: 'row', gap: 14 },
-  tlTime: { width: 48, paddingTop: 6, borderTopWidth: 1, alignSelf: 'flex-start', fontFamily: F.serif, fontSize: 15, fontVariant: ['tabular-nums'] },
-  stats: { flexDirection: 'row', gap: 8, marginTop: 30, paddingTop: 18, borderTopWidth: 1 },
+  block: { gap: 12, marginBottom: 18 },
+  tx: { fontSize: 15.5, lineHeight: 29 },
+  txEn: { fontSize: 17.5, lineHeight: 27 },
+  mos: { flexDirection: 'row', flexWrap: 'wrap', gap: SZ.tileGap },
+  mosI: { width: '48.7%', aspectRatio: 1, borderRadius: 12 },
+  tag: { position: 'absolute', left: 6, top: 6, height: 22, paddingHorizontal: 8, borderRadius: 11, justifyContent: 'center' },
+  three: { flexDirection: 'row', gap: SZ.tileGap, aspectRatio: 3 / 2 },
+  r: { borderRadius: 12 },
+  one: { width: '100%', aspectRatio: 4 / 3, borderRadius: 14 },
+  fold: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12, marginTop: 4 },
+  mini: { flexDirection: 'row', marginLeft: 'auto' },
+  miniI: { width: 26, height: 26, borderRadius: 8, marginLeft: -7, borderWidth: 2 },
+  foldGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SZ.tileGap, marginBottom: 8 },
+  foldI: { width: '32%', aspectRatio: 1, borderRadius: SZ.tileR },
+  callout: { flexDirection: 'row', gap: 10, padding: 14, borderRadius: 14, marginTop: 14 },
+  stats: { flexDirection: 'row', gap: 8, marginTop: 26 },
   num: { fontFamily: F.serifLight, fontSize: 26, lineHeight: 30 },
-  ask: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 44, paddingHorizontal: 14, gap: 12, zIndex: 3 },
-  sugg: { flexDirection: 'row', gap: 18, paddingHorizontal: 10, minHeight: 20, flexWrap: 'wrap' },
-  field: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 52, paddingLeft: 18, paddingRight: 6, borderRadius: 26, borderWidth: 1 },
-  input: { flex: 1, fontSize: 15, height: 52 },
+  ask: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 40, paddingHorizontal: 14, zIndex: 3 },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 50, paddingLeft: 18, paddingRight: 5, borderRadius: 25 },
+  input: { flex: 1, fontSize: 15, height: 50 },
   mic: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   go: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
 });
