@@ -309,7 +309,10 @@ function Movable({ id, r, z, W, locked, block, grab, move, drop, children }: {
     return Gesture.Simultaneous(pan, pinch);
   }, [id, W, locked, block, onGrab, onMove, onDrop, x, y, w, h, home, live, lift, size, last]);
   /* eslint-enable react-hooks/refs */
-  const style = useAnimatedStyle(() => ({ left: x.get(), top: y.get(), width: w.get(), height: h.get(), transform: [{ scale: lift.get() }] }));
+  const style = useAnimatedStyle(() => ({
+    left: x.get(), top: y.get(), width: w.get(), height: h.get(), transform: [{ scale: lift.get() }],
+    shadowOpacity: Math.min(0.28, (lift.get() - 1) * 7), shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, shadowColor: '#000',
+  }));
   return (
     <GestureDetector gesture={gesture}>
       <Re.View style={[{ position: 'absolute', zIndex: z }, style]}>
@@ -527,7 +530,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   const W = Dimensions.get('window').width - 2 * SZ.px;     // the page is today itself: no card, the full width
   const size = zh ? 14 : 15, lh = zh ? 21 : 19.5, gap = 17;
   const m = zh ? CN : SERIF;
-  const run = (spots: Spot[]) => flow(paras, spots, W, m, size, lh, gap, heads, indent ? size * (zh ? 2 : 1.25) : 0, floats);
+  const run = (spots: Spot[]) => flow(paras, spots, W, m, size, lh, gap, heads, indent ? (zh ? size * 2 : adv(m, size, 'nnnn')) : 0, floats);
 
   /* one paragraph per recording; a recording about photos brings its photos (a group counts as one tile) */
   const paras: string[] = [];
@@ -574,6 +577,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   const [live, setLive] = useState<Record<string, Pos>>({});      // positions changed since this page was opened
   const pos: Record<string, Pos> = { ...moved, ...live };
   const [front, setFront] = useState('');           // the photo picked up last sits above the others
+  const [holding, setHolding] = useState<string | null>(null);   // the photo held now: where it will land shows as a soft space
   const blocks: { spot: Spot; ch: number; tiles: { key: string; pics: Pic[]; r: Rect }[] }[] = [];
   const singles: { key: string; pics: Pic[]; w: number; h: number; at: Pos }[] = [];
   const below: Record<number, number> = {};
@@ -650,7 +654,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   const grab = useCallback((id: string) => {
     held.current = now.current.sizes[id] ?? { w: 0, h: 0 };
     shown.current = ''; last.current = null;
-    setFront(id);
+    setFront(id); setHolding(id);
   }, []);
   const q = (v: number) => Math.round(v / 6) * 6;  // positions kept in steps of 6 points, so the words don't reflow for every pixel
   /* where the held photo is now (its top-left and width, from the gesture): the place the words make for it */
@@ -659,13 +663,17 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     const same = !hd.w || Math.abs(w - hd.w) < 0.5;
     const ww = same ? hd.w || w : q(w), h = hd.w ? hd.h * ww / hd.w : ww * 0.75;
     const sp = toSpot(id, x, y, ww, h, now.current.base, W, lh, size);
-    place(id, { x: q(sp.x), y, p: sp.p, k: sp.k, w: ww });
+    /* it lands against whichever edge its middle is nearer, or across the page when it is that wide: the words keep to
+       one column beside it, and only move when it changes line or side, not with every point of the finger */
+    const side = ww >= W * 0.7 ? 0 : x + ww / 2 < W / 2 ? 0 : W - ww;
+    place(id, { x: Math.round(side), y, p: sp.p, k: sp.k, w: ww });
   }, [W, lh, size, place]);
   const drop = useCallback(() => {
     cancelAnimationFrame(frame.current);
     const lt = last.current;
     if (lt) { setLive((s) => ({ ...s, [lt.id]: lt.at })); moveTo.current(lt.id, lt.at); }
     last.current = null;
+    setHolding(null);
   }, []);
 
   /* a sticker let go (or just put on): tied to the paragraph its top is in; null throws it away */
@@ -782,6 +790,9 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
           </React.Fragment>
         ))}
         {lines.map(setLine)}
+        {holding && rects[holding] ? (
+          <View pointerEvents="none" style={[d.landing, { left: rects[holding].x, top: rects[holding].y, width: rects[holding].w, height: rects[holding].h, backgroundColor: t.gray }]} />
+        ) : null}
         {tiles.map((tl) => (
           <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop}>
             {tl.pics.length > 1 ? <Fluid pics={tl.pics} />
@@ -889,6 +900,7 @@ function VoiceBar({ bar }: { bar: Bar }) {
 const d = StyleSheet.create({
   head: { position: 'absolute', left: 0, fontSize: 14.5, lineHeight: 20, fontWeight: '600' },
   marker: { position: 'absolute', borderRadius: 3 },
+  landing: { position: 'absolute', borderRadius: 8, opacity: 0.7 },
   seg: { position: 'absolute', zIndex: 6, flexDirection: 'row', borderRadius: 17, padding: 3, gap: 2, width: 176, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
   segBtn: { flex: 1, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   dim: { position: 'absolute', left: -40, right: -40, top: -400, bottom: -800, opacity: 0.72, zIndex: 7 },
