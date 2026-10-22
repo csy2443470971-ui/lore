@@ -70,7 +70,8 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
       tick.current = setInterval(() => setShown((n) => Math.min(raw.length, n + 1)), 450);
     }
   }
-  const spoken = (u: Unit, text: string) => S.rangeWord(u.idx[0] + 1, u.idx[u.idx.length - 1] + 1, S.numWord) + S.is + text;
+  /* the sentence as said: "Number one is the café…" (mid-sentence, so English drops the capital) */
+  const spoken = (u: Unit, text: string) => S.rangeWord(u.idx[0] + 1, u.idx[u.idx.length - 1] + 1, S.numWord) + S.is + (zh ? text : text.charAt(0).toLowerCase() + text.slice(1));
   /* what this recording would become, whether it's kept now or brought back with Undo */
   function result(): Said | null {
     if (mode === 'photos') {
@@ -154,7 +155,7 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
 
           {unlaid.length ? <Stream items={unlaid} /> : null}
 
-          {livePhotos && reached.length ? <Stream items={[{ kind: 'photos', parts: reached.map((n) => ({ unit: units[n], text: lines[n] || line(n) })) }]} /> : null}
+          {livePhotos && reached.length ? <Stream items={[{ kind: 'photos', parts: reached.map((n) => ({ unit: units[n], text: lines[n] || line(n), spoken: spoken(units[n], lines[n] || line(n)) })) }]} /> : null}
           {liveTalk ? (
             <Text style={tx}>
               {raw.slice(0, shown).map((w, i) => {

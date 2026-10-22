@@ -47,7 +47,7 @@ export function Icon({ name, color, size = 18 }: { name: IconName; color: string
 export function DotField() {
   const t = useT();
   return (
-    <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+    <Svg width="100%" height="100%" style={StyleSheet.absoluteFill} pointerEvents="none">
       <Defs><Pattern id="dots" width={14} height={14} patternUnits="userSpaceOnUse"><Circle cx={1} cy={1} r={0.8} fill={t.dot} /></Pattern></Defs>
       <Rect x={0} y={0} width="100%" height="100%" fill="url(#dots)" />
     </Svg>

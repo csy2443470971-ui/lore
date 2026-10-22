@@ -47,7 +47,7 @@ const tokens = (s: string) => s.match(/[⺀-鿿豈-﫿　-〿＀-￯]|[^\s⺀-�
 const NO_START = /^[，。、！？；：）」』”’》,.!?;:)\]]/;
 
 function flow(paras: string[], rects: Rect[], width: number, m: Metric, size: number, lh: number, gap: number) {
-  const pad = 12, minSeg = size * 2.5;
+  const pad = 7, minSeg = size * 2.5;            // the gap kept around a photo, and the narrowest gap worth filling
   const lines: Line[] = [];
   const starts: number[] = [];
   let y = 0;
@@ -89,8 +89,8 @@ function flow(paras: string[], rects: Rect[], width: number, m: Metric, size: nu
 
 /* one photo (or group) on the page that can be dragged anywhere; the words get out of its way.
    The responder is made once, so a drag isn't reset as the position updates under the finger. */
-function Movable({ id, r, grab, drag, drop, children }: {
-  id: string; r: Rect; grab: (id: string) => void; drag: (id: string, dx: number, dy: number) => void; drop: () => void; children: React.ReactNode;
+function Movable({ id, r, z, grab, drag, drop, children }: {
+  id: string; r: Rect; z: number; grab: (id: string) => void; drag: (id: string, dx: number, dy: number) => void; drop: () => void; children: React.ReactNode;
 }) {
   const lift = useState(() => new Animated.Value(1))[0];
   const pr = useMemo(() => {
@@ -109,75 +109,98 @@ function Movable({ id, r, grab, drag, drop, children }: {
     });
   }, [id, grab, drag, drop, lift]);
   return (
-    <Animated.View {...pr.panHandlers} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, transform: [{ scale: lift }] }}>
-      {children}
+    <Animated.View {...pr.panHandlers} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, zIndex: z, transform: [{ scale: lift }] }}>
+      {/* the photo itself takes no touches: on the web an <img> would start the browser's own image drag and end ours */}
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>{children}</View>
     </Animated.View>
   );
 }
 
-/* After Lay out: the words and photos set as a page. Drag a photo and the paragraphs reflow around it. */
+/* how a set of photos sits together: one, a pair, one large with two small, or a 2×2 grid; w is the page width */
+const G = 4;
+function cluster(n: number, w: number): Rect[] {
+  if (n === 1) { const a = Math.round(w * 0.46); return [{ x: 0, y: 0, w: a, h: Math.round(a * 0.75) }]; }
+  const cw = Math.round(w * 0.56);
+  if (n === 2) { const a = (cw - G) / 2; return [{ x: 0, y: 0, w: a, h: a }, { x: a + G, y: 0, w: a, h: a }]; }
+  if (n === 3) {
+    const big = Math.round((cw - G) * 0.62), sw = cw - G - big, sh = (big - G) / 2;
+    return [{ x: 0, y: 0, w: big, h: big }, { x: big + G, y: 0, w: sw, h: sh }, { x: big + G, y: sh + G, w: sw, h: sh }];
+  }
+  const a = (cw - G) / 2;
+  return [0, 1, 2, 3].map((i) => ({ x: (i % 2) * (a + G), y: Math.floor(i / 2) * (a + G), w: a, h: a }));
+}
+
+/* After Lay out: the words and photos set as a page, dense like a printed page. The photos from one
+   recording sit together beside its paragraph; drag any photo and the paragraphs reflow around it. */
 export function Page({ items, photos, title, meta, onDrag }: { items: Said[]; photos: Pic[]; title: string; meta: string; onDrag: (on: boolean) => void }) {
   const t = useT();
   const S = useS();
   const face = useFace();
   const zh = useLang() === 'zh';
-  const W = Dimensions.get('window').width - 2 * SZ.px - 40;
-  const size = zh ? 16 : 17.5, lh = zh ? 29 : 27, gap = 14;
+  const W = Dimensions.get('window').width - 2 * SZ.px - 32;
+  const size = zh ? 14 : 15, lh = zh ? 22 : 20.5, gap = 7;
   const m = zh ? CN : SERIF;
 
-  /* paragraphs, and the photo (or group) each caption belongs to */
+  /* one paragraph per recording; a recording about photos brings its photos (a group counts as one tile) */
   const paras: string[] = [];
-  const pics: { key: string; para: number; pics: Pic[] }[] = [];
+  const sets: { para: number; tiles: { key: string; pics: Pic[] }[] }[] = [];
   items.forEach((x, i) => {
     if (x.kind === 'talk') { paras.push(x.text); return; }
-    x.parts.forEach((p, j) => {
-      const ps = p.unit.idx.map((k) => photos[k]).filter(Boolean);
-      if (ps.length) pics.push({ key: `${i}-${j}`, para: paras.length, pics: ps });
-      paras.push(p.text);
-    });
+    const tiles = x.parts.map((p, j) => ({ key: `${i}-${j}`, pics: p.unit.idx.map((k) => photos[k]).filter(Boolean) })).filter((tl) => tl.pics.length);
+    for (let c = 0; c < tiles.length; c += 4) sets.push({ para: paras.length, tiles: tiles.slice(c, c + 4) });
+    paras.push(x.parts.map((p) => p.text).join(zh ? '' : ' '));
   });
 
-  /* where each photo starts: alternating sides, each beside the start of its own caption */
+  /* where each photo starts: each set beside the start of its paragraph (or under the set before it),
+     sets alternating right and left; a photo that has been dragged stays where it was put */
   const [moved, setMoved] = useState<Record<string, { x: number; y: number }>>({});
   const [touched, setTouched] = useState(false);
-  const rects: Rect[] = [];
-  pics.forEach((p, n) => {
-    const w = Math.round(W * (p.pics.length > 1 ? 0.62 : 0.5));
-    const h = Math.round(p.pics.length >= 4 ? w : p.pics.length > 1 ? w / 2 : w * 0.8);
-    const at = moved[p.key];
-    if (at) { rects.push({ x: at.x, y: at.y, w, h }); return; }
-    const y = flow(paras, rects, W, m, size, lh, gap).starts[p.para] ?? 0;
-    rects.push({ x: n % 2 ? 0 : W - w, y: y + 4, w, h });
+  const [front, setFront] = useState('');           // the photo picked up last sits above the others
+  const tiles: { key: string; pics: Pic[]; r: Rect }[] = [];
+  let prevPara = -1, prevBottom = 0;
+  sets.forEach((st, n) => {
+    const shape = cluster(st.tiles.length, W);
+    const cw = Math.max(...shape.map((r) => r.x + r.w)), ch = Math.max(...shape.map((r) => r.y + r.h));
+    const placedRects = tiles.map((tl) => tl.r);
+    const at = flow(paras, placedRects, W, m, size, lh, gap).starts[st.para] ?? 0;
+    const y0 = st.para === prevPara ? prevBottom + G * 2 : at + 3;
+    const x0 = n % 2 ? 0 : W - cw;
+    st.tiles.forEach((tl, i) => {
+      const at2 = moved[tl.key];
+      tiles.push({ key: tl.key, pics: tl.pics, r: at2 ? { ...shape[i], x: at2.x, y: at2.y } : { ...shape[i], x: x0 + shape[i].x, y: y0 + shape[i].y } });
+    });
+    prevPara = st.para; prevBottom = y0 + ch;
   });
-  const { lines, height } = flow(paras, rects, W, m, size, lh, gap);
+  const { lines, height } = flow(paras, tiles.map((tl) => tl.r), W, m, size, lh, gap);
 
   /* where each photo was when the finger went down; read only inside the gesture handlers */
   const placed = useRef<Record<string, Rect>>({});
   const origin = useRef({ x: 0, y: 0 });
-  useEffect(() => { placed.current = Object.fromEntries(pics.map((p, n) => [p.key, rects[n]])); });
+  useEffect(() => { placed.current = Object.fromEntries(tiles.map((tl) => [tl.key, tl.r])); });
   const grab = useCallback((id: string) => {
     const r = placed.current[id]; if (r) origin.current = { x: r.x, y: r.y };
-    setTouched(true); onDrag(true);
+    setFront(id); onDrag(true);
   }, [onDrag]);
   const drag = useCallback((id: string, dx: number, dy: number) => {
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
     const w = placed.current[id]?.w ?? 0;
     setMoved((s) => ({ ...s, [id]: { x: Math.max(0, Math.min(W - w, origin.current.x + dx)), y: Math.max(0, origin.current.y + dy) } }));
   }, [W]);
-  const drop = useCallback(() => onDrag(false), [onDrag]);
+  /* the hint goes once the first photo is put down, not when it's picked up: a layout shift under the finger would end the drag */
+  const drop = useCallback(() => { onDrag(false); setTouched(true); }, [onDrag]);
 
   return (
     <View style={[d.page, { backgroundColor: t.panel }]}>
       <Text style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text>
-      <Text style={[d.meta, { color: t.mut }]}>{meta}</Text>
-      {pics.length && !touched ? <Text style={[d.hint, { color: t.mut }]}>{S.dragHint}</Text> : null}
-      <View style={{ height, marginTop: 20 }}>
+      <Text style={[d.meta, { color: t.mut }]}>{meta}{tiles.length && !touched ? `  ·  ${S.dragHint}` : ''}</Text>
+      <View style={{ height, marginTop: 12 }}>
         {lines.map((l, i) => (
           <Text key={i} numberOfLines={1} style={{ position: 'absolute', left: l.x, top: l.y, fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body }}>{l.s}</Text>
         ))}
-        {pics.map((p, n) => (
-          <Movable key={p.key} id={p.key} r={rects[n]} grab={grab} drag={drag} drop={drop}>
-            {p.pics.length > 1 ? <Mosaic pics={p.pics} w={rects[n].w} h={rects[n].h} r={14} />
-              : <Image source={src(p.pics[0])} contentFit="cover" style={{ width: rects[n].w, height: rects[n].h, borderRadius: 14 }} />}
+        {tiles.map((tl) => (
+          <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} grab={grab} drag={drag} drop={drop}>
+            {tl.pics.length > 1 ? <Mosaic pics={tl.pics} w={tl.r.w} h={tl.r.h} r={8} />
+              : <Image source={src(tl.pics[0])} contentFit="cover" style={{ width: tl.r.w, height: tl.r.h, borderRadius: 8 }} />}
           </Movable>
         ))}
       </View>
@@ -188,9 +211,8 @@ export function Page({ items, photos, title, meta, onDrag }: { items: Said[]; ph
 const d = StyleSheet.create({
   tx: { fontSize: 16, lineHeight: 29 },
   txEn: { fontSize: 17.5, lineHeight: 27 },
-  page: { borderRadius: SZ.panelR, padding: 20 },
-  title: { fontSize: 25, lineHeight: 35 },
-  titleEn: { fontSize: 29, lineHeight: 35, letterSpacing: -0.3 },
-  meta: { fontSize: 13, marginTop: 6 },
-  hint: { fontSize: 12.5, marginTop: 10 },
+  page: { borderRadius: SZ.panelR - 6, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 14 },
+  title: { fontSize: 20, lineHeight: 28 },
+  titleEn: { fontSize: 23, lineHeight: 28, letterSpacing: -0.2 },
+  meta: { fontSize: 11.5, marginTop: 3 },
 });

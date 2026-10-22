@@ -139,7 +139,7 @@ const zh = {
   sAuto: '自动带进来', sAutoSub: '当天的这些会自己排进页面。', sources: ['照片', '地点', '步数', '天气', '音乐'],
   sLocal: '只在手机上转写', sLocalSub: '原声不上传；整理用的文字离开手机前会去掉人名。',
   sExport: '导出', sExportSub: 'Markdown、PDF 或原声文件夹。',
-  colophon: '安静日记 0.3。你已经写了 41 天。',
+  colophon: 'lore 0.3。你已经写了 41 天。',
   pick: '选一个地方', pickSub: '你的日记会住在这里，白天和夜晚会自己切换。', close: '关闭',
   noNight: '只有白天', variant: '配色变体',
 };
@@ -247,7 +247,7 @@ const en: typeof zh = {
   sAuto: 'Bring in automatically', sAutoSub: 'These arrange themselves on the page.', sources: ['Photos', 'Places', 'Steps', 'Weather', 'Music'],
   sLocal: 'Transcribe on this phone only', sLocalSub: 'Recordings never leave the phone. Names are removed from any text sent for tidying.',
   sExport: 'Export', sExportSub: 'Markdown, PDF or a folder of recordings.',
-  colophon: 'Quiet Journal 0.3. You’ve written for 41 days.',
+  colophon: 'lore 0.3. You’ve written for 41 days.',
   pick: 'Pick a place', pickSub: 'Your journal lives here. Day and night switch on their own.', close: 'Close',
   noNight: 'Day only', variant: 'Colour variant',
 };

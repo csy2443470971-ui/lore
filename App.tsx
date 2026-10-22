@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, StyleSheet, useColorScheme, View } from 'react-native';
+import { Linking, Platform, StyleSheet, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as Haptics from 'expo-haptics';
@@ -19,6 +19,9 @@ import { Archive, Insights, Settings } from './src/Screens';
 type Mode = 'light' | 'dark' | 'auto';
 type Pane = null | 'archive' | 'insights' | 'settings';
 const EMPTY: Day = { photos: [], groups: [], said: [], laid: 0 };
+/* web only: ?seed=photos starts today with six sample photos, so the photo flow can be shown without a photo library */
+const SEED = Platform.OS === 'web' && typeof location !== 'undefined' && location.search.includes('seed=photos')
+  ? ['cafe', 'latte', 'sunset', 'osmanthus', 'noodles', 'hotpot'].map((k) => ({ asset: PHOTO[k] })) : [];
 
 /* One writing page for every day. Today starts empty; a day from Look back opens on the same page,
    already laid out, and you can keep talking into it. Look back and settings slide over it. */
@@ -32,7 +35,7 @@ export default function App() {
   const [mode, setModeState] = useState<Mode>('auto');
   const [lang, setLangState] = useState<Lang>('zh');
   const [pane, setPane] = useState<Pane>(null);
-  const [days, setDays] = useState<Record<string, Day>>({ today: EMPTY });
+  const [days, setDays] = useState<Record<string, Day>>({ today: { ...EMPTY, photos: SEED } });
   const [cur, setCur] = useState('today');           // 'today', or 'e<n>' for an entry from Look back
   const [making, setMaking] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
