@@ -226,9 +226,9 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   const sets: { para: number; tiles: { key: string; pics: Pic[] }[] }[] = [];
   /* above a paragraph: the time heading before it, and a voice bar where a new stretch of talking starts. Recordings
      belong to one bar while each starts within 20 minutes of the last one ending; a longer break starts a new bar */
-  const marks: { head?: string; bar?: Bar }[] = [];
+  const marks: { head?: string; bar?: Bar; time?: number }[] = [];
   let head: string | undefined, bar: Bar | undefined, open: Bar | undefined, lastEnd = 0;
-  const para = (text: string, from: Src[]) => { paras.push(text); srcs.push(from); marks.push({ head, bar }); head = undefined; bar = undefined; };
+  const para = (text: string, from: Src[], time?: number) => { paras.push(text); srcs.push(from); marks.push({ head, bar, time }); head = undefined; bar = undefined; };
   items.forEach((x, i) => {
     if (x.kind === 'head') { head = x.text; return; }
     for (const r of voice ? [...(x.audio ? [{ audio: x.audio, at: x.at, secs: x.secs }] : []), ...(x.more ?? [])] : []) {
@@ -236,7 +236,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
       open.uris.push(fileUri(r.audio)); open.secs += r.secs ?? 0;
       if (r.at) lastEnd = r.at + (r.secs ?? 0) * 1000;
     }
-    if (x.kind === 'talk') { if (x.text) para(x.text, [{ item: i, part: -1, from: 0 }]); return; }
+    if (x.kind === 'talk') { if (x.text) para(x.text, [{ item: i, part: -1, from: 0 }], x.at); return; }
     const tiles = x.parts.map((p, j) => ({ key: `${i}-${j}`, pics: p.unit.idx.map((k) => photos[k]).filter(Boolean) })).filter((tl) => tl.pics.length);
     for (let c = 0; c < tiles.length; c += 4) sets.push({ para: paras.length, tiles: tiles.slice(c, c + 4) });
     let text = '';                                  // captions join with a space, except next to Chinese
@@ -246,10 +246,11 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
       text += p.text;
       return at;
     })];
-    para(text, from);
+    para(text, from, x.at);
   });
-  const HEAD = 26, BAR = 30;
-  const heads = marks.map((mk) => (mk.head ? HEAD : 0) + (mk.bar ? BAR : 0));
+  /* above a paragraph: its time heading, then a row with the time it was said and, where a stretch of talking starts, its voice bar */
+  const HEAD = 26, BAR = 30, TIME = 20;
+  const heads = marks.map((mk) => (mk.head ? HEAD : 0) + (mk.bar ? BAR : mk.time ? TIME : 0));
   const e = PAD - (lh - size) / 2;
   const linesFor = (h: number) => Math.max(2, Math.round((h + 2 * e) / lh));
 
@@ -356,8 +357,9 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     const narrow = l.w < W * 0.6;                   // a column beside a photo: its edge faces the photo, so it stretches further
     const each = !l.last && cuts > 0 && room > 0 && room / cuts <= size * (chars ? 0.3 : narrow ? 1.5 : 0.6) ? room / cuts : 0;
     if (chars) {
-      /* letter spacing also follows the last character, so the room is shared by every character, less a little slack */
-      const ls = each ? Math.max(0, (room - 2) / toks.length) : 0;
+      /* letter spacing also follows the last character, so the room is shared by every character, less a little slack;
+         a line whose closing punctuation hangs past the edge is drawn a hair tighter instead, so it is never cut off */
+      const ls = each ? Math.max(0, (room - 2) / toks.length) : room < 0 ? (room - 1) / toks.length : 0;
       const step = (x: number) => Math.max(0, Math.min(toks.length - 1, Math.floor(x / ((natural / toks.length) + ls))));
       return (
         <Text key={li} numberOfLines={1} ellipsizeMode="clip" onPress={(ev) => edit(l.p, toks[step(ev.nativeEvent.locationX)].o)}
@@ -380,7 +382,12 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
         {marks.map((mk, pi) => (
           <React.Fragment key={`m${pi}`}>
             {mk.head ? <Text style={[d.head, { top: tops[pi], color: t.ink, fontFamily: face.title }]}>{mk.head}</Text> : null}
-            {mk.bar ? <View style={{ position: 'absolute', left: 0, top: tops[pi] + (mk.head ? HEAD : 0) }}><VoiceBar bar={mk.bar} /></View> : null}
+            {mk.bar || mk.time ? (
+              <View style={[d.stamp, { top: tops[pi] + (mk.head ? HEAD : 0), height: mk.bar ? 22 : 16 }]}>
+                {mk.time ? <Text style={[d.time, { color: t.mut }]}>{clock(mk.time)}</Text> : null}
+                {mk.bar ? <VoiceBar bar={mk.bar} /> : null}
+              </View>
+            ) : null}
           </React.Fragment>
         ))}
         {lines.map(setLine)}
@@ -430,7 +437,7 @@ function VoiceBar({ bar }: { bar: Bar }) {
     setOn(true);
     setAudioModeAsync({ playsInSilentMode: true }).catch(() => {}).finally(() => { if (player.current) player.current.play(); else playFrom(0); });
   }
-  const label = [bar.secs ? mmss(bar.secs) : '', bar.at ? clock(bar.at) : ''].filter(Boolean).join(' · ');
+  const label = bar.secs ? mmss(bar.secs) : '';     // the time it was said sits beside the bar
   return (
     <Pressable onPress={toggle} hitSlop={6} accessibilityRole="button" accessibilityLabel={label || 'voice'}
       style={({ pressed }) => [d.bar, { backgroundColor: t.panel, opacity: pressed ? 0.75 : 1 }]}>
@@ -445,6 +452,8 @@ function VoiceBar({ bar }: { bar: Bar }) {
 
 const d = StyleSheet.create({
   head: { position: 'absolute', left: 0, fontSize: 14.5, lineHeight: 20, fontWeight: '600' },
+  stamp: { position: 'absolute', left: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  time: { fontSize: 11.5, letterSpacing: 0.3, fontVariant: ['tabular-nums'] },
   bar: { flexDirection: 'row', alignItems: 'center', gap: 7, height: 22, paddingLeft: 3, paddingRight: 9, borderRadius: 11 },
   play: { width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   tri: { width: 0, height: 0, marginLeft: 1.5, borderLeftWidth: 6, borderTopWidth: 4, borderBottomWidth: 4, borderLeftColor: '#fff', borderTopColor: 'transparent', borderBottomColor: 'transparent' },

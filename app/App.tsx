@@ -266,9 +266,13 @@ export default function App() {
       if (!hs.length) return [x];
       if (x.kind !== 'talk') return [{ kind: 'head', text: hs[0].text }, x];
       const cuts = [...new Set([0, ...hs.map((h) => h.j)])].sort((a, b) => a - b);
+      const whole = x.text.length;
       return cuts.flatMap((c, k): Said[] => {
         const text = join(sents[i].slice(c, cuts[k + 1] ?? sents[i].length)), h = hs.find((hh) => hh.j === c);
-        const part: Said = k === 0 ? { ...x, text } : { kind: 'talk', text, g: x.g };
+        /* a later piece of a recording gets the time its words were said, estimated from where they sit in it */
+        const before = join(sents[i].slice(0, c)).length;
+        const at = x.at && x.secs ? Math.round(x.at + (x.secs * 1000 * before) / whole) : x.at;
+        const part: Said = k === 0 ? { ...x, text } : { kind: 'talk', text, g: x.g, at };
         return h ? [{ kind: 'head', text: h.text }, part] : [part];
       });
     });
@@ -353,7 +357,7 @@ export default function App() {
                   <Week days={days} keys={weekKeys} title={S.navWeek} voice={voice} indent={indent} onTitle={() => setMenu(true)} onOpen={setPane} onDay={setCur}
                     labelOf={(k) => `${dateTitle(k, lang).meta} · ${dateTitle(k, lang).title}`} />
                 ) : (
-                <Home key={cur} hidden={pane !== null} night={h >= 18 || h < 5}
+                <Home day={cur} hidden={pane !== null} night={h >= 18 || h < 5}
                   past={!!entry} title={entry ? entry.when : nameOf(cur)} onTitle={entry ? undefined : () => setMenu(true)} onDate={entry ? undefined : () => setPicking(true)} onToday={() => setCur(today)}
                   pageTitle={entry ? entry.t : dated.title} pageMeta={entry ? '' : dated.meta}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}

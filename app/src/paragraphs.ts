@@ -35,7 +35,13 @@ export function shape(list: Said[], breaks: Set<string>): Said[] {
       acc += u;
     }
     if (out.length > 1 && units(join(out[out.length - 1])) < MIN) { const last = out.pop()!; out[out.length - 1].push(...last); }
-    return out.map((ss, k): Said => (k === 0 ? { ...x, text: join(ss) } : { kind: 'talk', text: join(ss), g: x.g }));
+    const whole = units(x.text);
+    let before = 0;
+    return out.map((ss, k): Said => {
+      const text = join(ss), at = x.at && x.secs ? Math.round(x.at + (x.secs * 1000 * before) / whole) : x.at;
+      before += units(text);
+      return k === 0 ? { ...x, text } : { kind: 'talk', text, g: x.g, at };
+    });
   });
   /* too short: join the paragraph after it, or else the one before */
   const out: Said[] = [];

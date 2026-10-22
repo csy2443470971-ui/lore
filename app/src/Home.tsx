@@ -14,8 +14,9 @@ import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, u
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ hidden, night, past, title, onTitle, onDate, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
+export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
   hidden: boolean; night: boolean;
+  day: string;                                      // which day is shown; switching days keeps this screen and swaps only the page
   past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
   onTitle?: () => void;                              // the title opens the menu of days
   onDate?: () => void;                               // the page's date: choose which day it belongs to
@@ -65,6 +66,17 @@ export function Home({ hidden, night, past, title, onTitle, onDate, pageTitle, p
 
   useEffect(() => { Animated.timing(fade, { toValue: hidden ? 0 : 1, duration: 360, useNativeDriver: true }).start(); }, [hidden, fade]);
   useEffect(() => () => { if (tick.current) clearInterval(tick.current); }, []);
+  /* another day: clear what belonged to the last one and fade the new page in, instead of rebuilding the whole screen */
+  const turn = useState(() => new Animated.Value(1))[0];
+  const shownDay = useRef(day);
+  useEffect(() => {
+    if (shownDay.current === day) return;
+    shownDay.current = day;
+    setK(-1); setLines({}); setSelect(false); setSel([]); setEditing(null); setGhost(null); setOver(null);
+    scroll.current?.scrollTo({ y: 0, animated: false });
+    turn.setValue(0.25);
+    Animated.timing(turn, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+  }, [day, turn]);
 
   const units = unitsOf(photos.length, groups);
   const talked = new Set(said.flatMap((x) => (x.kind === 'photos' ? x.parts.map((p) => p.unit.idx[0]) : [])));
@@ -248,10 +260,10 @@ export function Home({ hidden, night, past, title, onTitle, onDate, pageTitle, p
         </View>
       ) : (
         <Carry take={take} hold={hold} follow={follow} letGo={letGo} putBack={putBack}>
-        <ScrollView ref={scroll} scrollEnabled={!dragging} onScrollBeginDrag={scrolled} style={[StyleSheet.absoluteFill, { top: top + 50 }]} showsVerticalScrollIndicator={false}
+        <Animated.ScrollView ref={scroll} scrollEnabled={!dragging} onScrollBeginDrag={scrolled} style={[StyleSheet.absoluteFill, { top: top + 50, opacity: turn }]} showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
-          {laid > 0 ? <Page items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
+          {laid > 0 ? <Page key={day} items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
             preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent} onTitle={recording ? undefined : onDate}
             onDrag={setDragging} onMove={onMove} onEdit={edit} /> : null}
 
@@ -294,7 +306,7 @@ export function Home({ hidden, night, past, title, onTitle, onDate, pageTitle, p
               <Text style={[h.ask, { color: t.ink, fontFamily: face.title }]}>{S.ask0}</Text>
             </View>
           ) : null}
-        </ScrollView>
+        </Animated.ScrollView>
         </Carry>
       )}
 
