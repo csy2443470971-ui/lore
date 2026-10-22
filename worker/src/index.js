@@ -1,15 +1,17 @@
-// Lore's backend. Three routes, all POST, all need the app's key in the x-lore-key header:
+// Lore's backend. The routes, all POST, all need the app's key in the x-lore-key header:
 //   /transcribe   { audio: base64, mime, grammar } or form field "audio" → { raw, text, tidied, via, fixed }
 //                 gpt-transcribe, then the fix-the-stutter node, then the fix-the-mishearing node (with grammar unless grammar is false)
 //   /tidy         { text }                 → { text, via }        the fix-the-stutter node only: segments tidied while the person talks
 //   /fix          { text, grammar }        → { text, via }        the fix-the-mishearing node only: older words, when a day is laid out again
 //   /sections     { sentences: [] }        → { sections, breaks, via }   the time-heading node: where the day moves to a new time, and where it turns to a new subject
 //   /layout       { text, photos: [] }      → { spec }             premium: the layout director
+//   /read         { image: base64, mime }  → { text }             the paper-page node: a photo of a handwritten page, read word for word
 import Anthropic from '@anthropic-ai/sdk';
 import { SYSTEM, messages, tidy } from '../../core.mjs';
 import { fix } from '../../fix.mjs';
 import { sections, topics } from '../../sections.mjs';
 import { direct } from '../../director.mjs';
+import { read } from '../../read.mjs';
 
 const HINT = '普通话日记，常夹杂英文单词。Mandarin journal with English words mixed in.';
 const MAX_AUDIO = 15 * 1024 * 1024, MAX_TEXT = 20000;
@@ -40,6 +42,19 @@ async function haiku(env, system, msgs) {
   const claude = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   const res = await claude.messages.create({ model: 'claude-haiku-5-5', max_tokens: 2000, system, messages: msgs, thinking: { type: 'disabled' }, output_config: { effort: 'low' } });
   return { text: res.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim() };
+}
+/* reading handwriting: Claude Sonnet 5.5 with vision, thinking off (the page is only transcribed) */
+async function sonnetSees(env, { system, image, mime }) {
+  const claude = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+  const t0 = Date.now();
+  const res = await claude.messages.create({
+    model: 'claude-sonnet-5-5', max_tokens: 4000, system, thinking: { type: 'between_tools' }, output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: [
+      { type: 'image', source: { type: 'base64', media_type: mime, data: image } },
+      { type: 'text', text: 'Transcribe this page.' },
+    ] }],
+  });
+  return { text: res.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim(), ms: Date.now() - t0 };
 }
 /* each node: first DeepSeek on Together; if its result fails the node's checks, Claude Haiku 5.5 once */
 function tidyCall(env, model) {
@@ -104,6 +119,12 @@ export default {
         const call = (p) => together(env, STEADY, p.system, p.messages, { response_format: { type: 'json_object' } });
         const [out, tp] = await Promise.all([sections(sentences.map(String), call), topics(sentences.map(String), call)]);
         return json({ sections: out.sections, breaks: tp.breaks, via: out.via });
+      }
+      if (url.pathname === '/read') {
+        const { image, mime } = await req.json();
+        if (!image) return json({ error: 'no image' }, 400);
+        const type = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'].includes(mime) ? mime : 'image/jpeg';
+        return json(await read(image, type === 'image/heic' ? 'image/jpeg' : type, (p) => sonnetSees(env, p)));
       }
       if (url.pathname === '/layout') {
         const { text, photos } = await req.json();
