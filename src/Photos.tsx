@@ -9,6 +9,31 @@ import { useT } from './ui';
 const src = (p: Pic) => (p.uri ? { uri: p.uri } : p.asset);
 
 /* a group shown as one tile: up to four photos in a little mosaic */
+/* a group in the tray: its photos stacked, the top one straight and the ones behind turned a little,
+   so their corners show on the left and right and it reads as several photos, not one */
+export function Stack({ pics, size, r }: { pics: Pic[]; size: number; r: number }) {
+  const t = useT();
+  const card = Math.round(size * 0.78);
+  const back = pics.length >= 3 ? [{ p: pics[2], rot: '11deg', dx: size * 0.08 }, { p: pics[1], rot: '-11deg', dx: -size * 0.08 }]
+    : [{ p: pics[1], rot: '-11deg', dx: -size * 0.07 }];
+  const layer = (p: Pic, rot: string, dx: number) => (
+    <View style={[st.layer, { width: card, height: card, borderRadius: r, borderColor: t.b, transform: [{ translateX: dx }, { rotate: rot }] }]}>
+      <Image source={src(p)} contentFit="cover" style={{ width: '100%', height: '100%', borderRadius: r - 1 }} />
+    </View>
+  );
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      {back.map((b, i) => <View key={i} style={StyleSheet.absoluteFill}><View style={st.center}>{layer(b.p, b.rot, b.dx)}</View></View>)}
+      {layer(pics[0], pics.length >= 3 ? '0deg' : '3deg', pics.length >= 3 ? 0 : size * 0.03)}
+    </View>
+  );
+}
+
+const st = StyleSheet.create({
+  layer: { overflow: 'hidden', borderWidth: 1.5, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+});
+
 export function Mosaic({ pics, w, h, r }: { pics: Pic[]; w: number; h: number; r: number }) {
   const t = useT();
   const four = pics.length >= 4, list = pics.slice(0, four ? 4 : 2);
@@ -42,7 +67,7 @@ export function Tray({ photos, groups, width, select, sel, onToggle, onLong, cur
   /* count rows the way flex-wrap lays them out: a group takes two cells and moves down if it doesn't fit */
   const rowOf: number[] = [];
   let rows = units.length ? 1 : 0, used = 0;
-  units.forEach((u) => { const w = u.idx.length > 1 ? 2 : 1; if (used + w > cols) { rows++; used = 0; } used += w; rowOf.push(rows - 1); });
+  units.forEach(() => { if (used + 1 > cols) { rows++; used = 0; } used += 1; rowOf.push(rows - 1); });   // a group is one stack, one cell
   const win = rows > 3;
   const gap = SZ.tileGap, pad = win ? 8 : 0;
   const tile = (width - pad * 2 - gap * (cols - 1)) / cols;
@@ -62,7 +87,7 @@ export function Tray({ photos, groups, width, select, sel, onToggle, onLong, cur
           if (u.idx.length > 1) {
             return (
               <Pressable key={'g' + u.idx[0]} disabled={select} delayLongPress={350} onLongPress={() => onLong(n)} style={{ opacity: select ? 0.5 : dim }}>
-                <Mosaic pics={u.idx.map((i) => photos[i])} w={tile * 2 + gap} h={tile} r={r} />
+                <Stack pics={u.idx.map((i) => photos[i])} size={tile} r={r} />
                 <Badge text={label(u)} mid={tile > 90} />
                 {n === cur ? ring : null}
               </Pressable>
