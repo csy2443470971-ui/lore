@@ -243,9 +243,11 @@ function Fluid({ pics }: { pics: Pic[] }) {
    corner, between a quarter of the page and all of it). While it is held the page hears where it is, a few times a
    frame at most, and makes room for it; let go, it settles into the place the words left for it. When the words move
    it (another photo was dragged, the page was laid out again) it glides to its new place. */
-function Movable({ id, r, z, W, locked, block, grab, move, drop, children }: {
+function Movable({ id, r, z, W, locked, block, grab, move, drop, open, children }: {
   id: string; r: Rect; z: number; W: number; locked?: boolean; block?: React.RefObject<unknown>;
-  grab: (id: string) => void; move: (id: string, x: number, y: number, w: number) => void; drop: () => void; children: React.ReactNode;
+  grab: (id: string) => void; move: (id: string, x: number, y: number, w: number) => void; drop: () => void;
+  open?: (id: string) => void;                     // a tap opens the photo full screen
+  children: React.ReactNode;
 }) {
   const x = useSharedValue(r.x), y = useSharedValue(r.y), w = useSharedValue(r.w), h = useSharedValue(r.h);
   const home = useSharedValue(r);                  // where the page keeps it
@@ -254,8 +256,9 @@ function Movable({ id, r, z, W, locked, block, grab, move, drop, children }: {
   const size = useSharedValue({ w: 0, h: 0 });   // its size when two fingers came down
   const last = useSharedValue({ x: 0, y: 0, n: 0 });   // the finger's last position and how many fingers were down
   /* the page's handlers reach the gesture through a ref, so a re-render of the page never rebuilds a gesture under way */
-  const cb = useRef({ grab, move, drop });
-  useEffect(() => { cb.current = { grab, move, drop }; });
+  const cb = useRef({ grab, move, drop, open });
+  useEffect(() => { cb.current = { grab, move, drop, open }; });
+  const onOpen = useCallback((k: string) => cb.current.open?.(k), []);
   const onGrab = useCallback((k: string) => cb.current.grab(k), []);
   const onMove = useCallback((k: string, a: number, b: number, c: number) => cb.current.move(k, a, b, c), []);
   const onDrop = useCallback(() => cb.current.drop(), []);
@@ -306,8 +309,9 @@ function Movable({ id, r, z, W, locked, block, grab, move, drop, children }: {
       })
       .onFinalize(() => end(2));
     if (block && Platform.OS !== 'web') { pan.blocksExternalGesture(block as never); pinch.blocksExternalGesture(block as never); }
-    return Gesture.Simultaneous(pan, pinch);
-  }, [id, W, locked, block, onGrab, onMove, onDrop, x, y, w, h, home, live, lift, size, last]);
+    const tap = Gesture.Tap().maxDuration(300).onEnd((_e, ok) => { if (ok) scheduleOnRN(onOpen, id); });
+    return Gesture.Race(tap, Gesture.Simultaneous(pan, pinch));
+  }, [id, W, locked, block, onGrab, onMove, onDrop, onOpen, x, y, w, h, home, live, lift, size, last]);
   /* eslint-enable react-hooks/refs */
   const style = useAnimatedStyle(() => ({
     left: x.get(), top: y.get(), width: w.get(), height: h.get(), transform: [{ scale: lift.get() }],
@@ -504,7 +508,7 @@ export const solo = (w: number) => cluster(1, w)[0];
    English lines up at both edges like Chinese. Drag any photo and the paragraphs reflow around it; where it ends up
    is kept. A photo carried in from the tray (preview) moves the words before it is let go. Tap a word to edit it. */
 type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
-export function Page({ items, photos, placed, moved, preview, voice, indent, onTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
+export function Page({ items, photos, placed, moved, preview, voice, indent, onTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
   items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; preview?: { pics: Pic[]; x: number; y: number } | null;
   voice?: boolean;                                                // voice bars at the top left of what was said (a setting)
   indent?: boolean;                                               // first-line indent (a setting)
@@ -514,6 +518,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   onDrag: (on: boolean) => void; onMove: (key: string, at: Pos) => void; onEdit: (item: number, part: number) => void;
   /* a long press lifts a paragraph: join it to the one above (the item that starts it) or below, share it, or select its words */
   onMerge?: (item: number) => void; onShare?: (item: number) => void; onSelect?: (text: string) => void;
+  onOpen?: (idx: number[]) => void;                              // a tap on a photo (or group): open it full screen
   chosen?: Set<string>;                                          // choosing what to share: these paragraphs ('t<item>') and photos are marked
   onChoose?: (key: string) => void;                              // while choosing, a tap marks a paragraph or photo instead of editing it
   stickers?: Sticker[]; slap?: string;                           // slap: the sticker just put on, which lands with a little bounce
@@ -577,6 +582,15 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   const [live, setLive] = useState<Record<string, Pos>>({});      // positions changed since this page was opened
   const pos: Record<string, Pos> = { ...moved, ...live };
   const [front, setFront] = useState('');           // the photo picked up last sits above the others
+  /* a tapped tile: its photos by number */
+  const opener = useRef({ items, placed, onOpen });
+  useEffect(() => { opener.current = { items, placed, onOpen }; });
+  const openTile = useCallback((key: string) => {
+    const { items: its, placed: pl, onOpen: go } = opener.current, m = /^(\d+)-(\d+)$/.exec(key);
+    const x = m ? its[+m[1]] : undefined;
+    const idx = m ? (x?.kind === 'photos' ? x.parts[+m[2]]?.unit.idx ?? [] : []) : pl?.find((p) => p.id === key)?.idx ?? [];
+    if (idx.length) go?.(idx);
+  }, []);
   const [holding, setHolding] = useState<string | null>(null);   // the photo held now: where it will land shows as a soft space
   const blocks: { spot: Spot; ch: number; tiles: { key: string; pics: Pic[]; r: Rect }[] }[] = [];
   const singles: { key: string; pics: Pic[]; w: number; h: number; at: Pos }[] = [];
@@ -794,7 +808,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
           <View pointerEvents="none" style={[d.landing, { left: rects[holding].x, top: rects[holding].y, width: rects[holding].w, height: rects[holding].h, backgroundColor: t.gray }]} />
         ) : null}
         {tiles.map((tl) => (
-          <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop}>
+          <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop} open={onOpen ? openTile : undefined}>
             {tl.pics.length > 1 ? <Fluid pics={tl.pics} />
               : <Image source={src(tl.pics[0])} contentFit="cover" style={[StyleSheet.absoluteFill, { borderRadius: 8 }]} />}
           </Movable>

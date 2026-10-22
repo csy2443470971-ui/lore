@@ -1,6 +1,7 @@
 /* What happened in a day: photos picked, groups made, and what was said. */
 /* file: the photo's path inside Documents, once it has been copied out of the picker's cache; r: its height over its width */
-export type Pic = { uri?: string; asset?: number; file?: string; r?: number };
+/* orig: the photo as it was before marks or stickers were set into it, to go back to */
+export type Pic = { uri?: string; asset?: number; file?: string; r?: number; orig?: { uri?: string; asset?: number; file?: string; r?: number } };
 export type Unit = { idx: number[] };            // one photo, or a group of photos (indices into the picked list)
 /* spoken: the sentence as said ("one is the café…"); text: the same words without the number, used as the caption */
 export type Part = { unit: Unit; text: string; spoken?: string };

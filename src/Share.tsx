@@ -9,7 +9,7 @@ import { Round, useLang, useS, useT } from './ui';
 /* capturing a view needs react-native-view-shot's native side, which only the newly installed app has; an app installed
    before it still runs this same update, without the button doing more than saying so */
 type Shot = { captureRef: (v: unknown, o: object) => Promise<string> };
-const shot: Shot | null = Platform.OS !== 'web' && (TurboModuleRegistry.get('RNViewShot') || NativeModules.RNViewShot)
+export const shot: Shot | null = Platform.OS !== 'web' && (TurboModuleRegistry.get('RNViewShot') || NativeModules.RNViewShot)
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- loaded only when the native side is there
   ? require('react-native-view-shot') : null;
 

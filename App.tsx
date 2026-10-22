@@ -321,6 +321,20 @@ export default function App() {
   function moveSticker(id: string, at: Partial<Sticker> | null) {
     update(cur, (d) => ({ ...d, stickers: at ? (d.stickers ?? []).map((st) => (st.id === id ? { ...st, ...at } : st)) : (d.stickers ?? []).filter((st) => st.id !== id) }));
   }
+  /* the full-screen photo: delete it, set marks into it (the photo as it was is kept), go back to it, or keep a cut-out */
+  const onPhoto = {
+    del: (i: number) => { setPast((m) => ({ ...m, [cur]: [] })); update(cur, (d) => removePhotos(d, [i])); },
+    save: async (i: number, uri: string, r: number) => {
+      const kept = await keepPhoto(uri);
+      update(cur, (d) => ({ ...d, photos: d.photos.map((p, k) => (k === i ? { ...kept, r, orig: p.orig ?? { uri: p.uri, asset: p.asset, file: p.file, r: p.r } } : p)) }));
+    },
+    restore: (i: number) => update(cur, (d) => ({ ...d, photos: d.photos.map((p, k) => (k === i && p.orig ? { ...p.orig } : p)) })),
+    lifted: (file: string) => {
+      const rel = relative(file);
+      setMine((m) => { const next = [rel, ...m]; saveMine(next); return next; });
+      return 'file:' + rel;
+    },
+  };
   async function makeSticker(): Promise<string | null> {
     if (!LoreVision) { setNotice({ text: S.liftNeedsApp }); return null; }
     const c = await ask([S.shootPhoto, S.library]);
@@ -608,7 +622,7 @@ export default function App() {
                   placed={day.placed} moved={day.moved} onText={editText}
                   onPlace={(idx, at) => { const id = 'p' + Date.now().toString(36); update(cur, (d) => ({ ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } })); }}
                   onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))}
-                  stickers={day.stickers} slap={slap} mine={mine} onAddSticker={addSticker} onSticker={moveSticker} onMakeSticker={makeSticker} />
+                  stickers={day.stickers} slap={slap} mine={mine} onAddSticker={addSticker} onSticker={moveSticker} onMakeSticker={makeSticker} onPhoto={onPhoto} />
                 )}
                 {menu ? <DayMenu opts={menuOpts} cur={curKey === cur ? cur : curKey} onClose={() => setMenu(false)}
                   onPick={(k) => { setMenu(false); if (k === 'combine') setRanging(true); else if (k === 'split') split(cur); else setCur(k); }} /> : null}
