@@ -1,5 +1,5 @@
 // Lore's backend. Three routes, all POST, all need the app's key in the x-lore-key header:
-//   /transcribe   form field "audio" (m4a) → { raw, text, via }   gpt-transcribe, then the fix-the-stutter node
+//   /transcribe   { audio: base64 m4a } or form field "audio" → { raw, text, via }   gpt-transcribe, then the fix-the-stutter node
 //   /tidy         { text }                 → { text, via }        the fix-the-stutter node only
 //   /layout       { text, photos: [] }      → { spec }             premium: the layout director
 import Anthropic from '@anthropic-ai/sdk';
@@ -48,11 +48,24 @@ export default {
     if (!success) return json({ error: 'slow down' }, 429);
     try {
       if (url.pathname === '/transcribe') {
-        const form = await req.formData();
-        const audio = form.get('audio');
-        if (!audio || typeof audio === 'string') return json({ error: 'no audio' }, 400);
-        if (audio.size > MAX_AUDIO) return json({ error: 'audio too long' }, 413);
-        const raw = await transcribe(env, audio, String(form.get('vocabulary') ?? '').slice(0, 300));
+        // the app sends { audio: base64, mime } as JSON; a form with an "audio" file works too (curl, the evals)
+        let audio, vocabulary = '';
+        if ((req.headers.get('content-type') ?? '').includes('application/json')) {
+          const body = await req.json();
+          if (typeof body.audio !== 'string' || !body.audio) return json({ error: 'no audio' }, 400);
+          if (body.audio.length * 0.75 > MAX_AUDIO) return json({ error: 'audio too long' }, 413);
+          const bin = atob(body.audio), bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          audio = new File([bytes], 'entry.m4a', { type: body.mime || 'audio/mp4' });
+          vocabulary = String(body.vocabulary ?? '');
+        } else {
+          const form = await req.formData();
+          audio = form.get('audio');
+          if (!audio || typeof audio === 'string') return json({ error: 'no audio' }, 400);
+          if (audio.size > MAX_AUDIO) return json({ error: 'audio too long' }, 413);
+          vocabulary = String(form.get('vocabulary') ?? '');
+        }
+        const raw = await transcribe(env, audio, vocabulary.slice(0, 300));
         if (!raw.trim()) return json({ raw: '', text: '', via: 'empty' });
         const out = await tidy(raw, tidyCall(env));
         return json({ raw, text: out.text, via: out.via });
