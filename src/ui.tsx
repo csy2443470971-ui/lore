@@ -19,7 +19,7 @@ export function useFace() {
   return { body: zh ? F.cn : F.serif, title: zh ? F.cnMed : F.serif, italic: zh ? F.cn : F.serifIt };
 }
 
-type IconName = 'camera' | 'cal' | 'gear' | 'layout' | 'mic' | 'book' | 'user' | 'back' | 'down' | 'plus' | 'photo' | 'close' | 'chev' | 'pin' | 'list' | 'settings' | 'up';
+type IconName = 'camera' | 'cal' | 'gear' | 'layout' | 'mic' | 'book' | 'user' | 'back' | 'down' | 'plus' | 'photo' | 'close' | 'chev' | 'pin' | 'list' | 'settings' | 'up' | 'undo';
 export function Icon({ name, color, size = 18 }: { name: IconName; color: string; size?: number }) {
   const p = { stroke: color, strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' };
   return (
@@ -32,6 +32,7 @@ export function Icon({ name, color, size = 18 }: { name: IconName; color: string
       {name === 'book' && <Path d="M5 5.5h6a1 1 0 0 1 1 1V19H6a1 1 0 0 1-1-1zM19 5.5h-6a1 1 0 0 0-1 1V19h6a1 1 0 0 0 1-1z" {...p} />}
       {name === 'user' && (<><Circle cx={12} cy={9} r={3.5} {...p} /><Path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" {...p} /></>)}
       {name === 'back' && <Path d="M15 6l-6 6 6 6" {...p} />}
+      {name === 'undo' && <Path d="M8.5 5.5 4.5 9.5l4 4M5 9.5h9a5 5 0 0 1 0 10h-3" {...p} />}
       {name === 'down' && <Path d="M12 5v14M6 13l6 6 6-6" {...p} />}
       {name === 'up' && <Path d="M12 19V5M6 11l6-6 6 6" {...p} />}
       {name === 'plus' && <Path d="M12 5v14M5 12h14" {...p} />}
