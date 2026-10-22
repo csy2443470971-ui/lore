@@ -3,25 +3,36 @@
 import { fileUri } from './store';
 
 export type SetSticker = { name: string; src: number };
-/* drawn in Lovart (GPT Image 2.5) from a Pinterest brief: risograph grain, warm ink outline, the app's red, teal and ochre */
+/* drawn in Lovart (GPT Image 2.5) from a Pinterest brief: risograph grain, warm ink outline, the app's red, teal and ochre;
+   everyday city things first (coffee to go, a laptop, a museum), no brand marks */
 export const SET: SetSticker[] = [
+  { name: 'takeaway', src: require('../assets/stickers/takeaway.webp') },
   { name: 'coffee', src: require('../assets/stickers/coffee.webp') },
+  { name: 'icedlatte', src: require('../assets/stickers/icedlatte.webp') },
+  { name: 'bubbletea', src: require('../assets/stickers/bubbletea.webp') },
   { name: 'croissant', src: require('../assets/stickers/croissant.webp') },
   { name: 'egg', src: require('../assets/stickers/egg.webp') },
-  { name: 'lemon', src: require('../assets/stickers/lemon.webp') },
   { name: 'ramen', src: require('../assets/stickers/ramen.webp') },
+  { name: 'laptop', src: require('../assets/stickers/laptop.webp') },
+  { name: 'phone', src: require('../assets/stickers/phone.webp') },
+  { name: 'earbuds', src: require('../assets/stickers/earbuds.webp') },
   { name: 'camera', src: require('../assets/stickers/camera.webp') },
-  { name: 'cassette', src: require('../assets/stickers/cassette.webp') },
-  { name: 'headphones', src: require('../assets/stickers/headphones.webp') },
+  { name: 'instant', src: require('../assets/stickers/instant.webp') },
+  { name: 'vinyl', src: require('../assets/stickers/vinyl.webp') },
+  { name: 'mic', src: require('../assets/stickers/mic.webp') },
+  { name: 'controller', src: require('../assets/stickers/controller.webp') },
+  { name: 'museum', src: require('../assets/stickers/museum.webp') },
+  { name: 'bust', src: require('../assets/stickers/bust.webp') },
+  { name: 'painting', src: require('../assets/stickers/painting.webp') },
+  { name: 'popcorn', src: require('../assets/stickers/popcorn.webp') },
+  { name: 'boarding', src: require('../assets/stickers/boarding.webp') },
   { name: 'books', src: require('../assets/stickers/books.webp') },
-  { name: 'letter', src: require('../assets/stickers/letter.webp') },
-  { name: 'ticket', src: require('../assets/stickers/ticket.webp') },
+  { name: 'lamp', src: require('../assets/stickers/lamp.webp') },
+  { name: 'tote', src: require('../assets/stickers/tote.webp') },
+  { name: 'sunglasses', src: require('../assets/stickers/sunglasses.webp') },
   { name: 'key', src: require('../assets/stickers/key.webp') },
   { name: 'plant', src: require('../assets/stickers/plant.webp') },
-  { name: 'tulip', src: require('../assets/stickers/tulip.webp') },
-  { name: 'umbrella', src: require('../assets/stickers/umbrella.webp') },
   { name: 'bicycle', src: require('../assets/stickers/bicycle.webp') },
-  { name: 'sneaker', src: require('../assets/stickers/sneaker.webp') },
 ];
 
 /* where a sticker's picture comes from */

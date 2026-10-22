@@ -12,7 +12,7 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "按住红点说话时，用麦克风录下你的声音。"
       },
-      "runtimeVersion": "exposdk:57.0.0",
+      "runtimeVersion": "lore-2",
       "appleTeamId": "N9M5D75C74"
     },
     "android": {

@@ -7,6 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Updates from 'expo-updates';
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Newsreader_300Light, Newsreader_400Regular, Newsreader_400Regular_Italic } from '@expo-google-fonts/newsreader';
 import { Lang, STR } from './src/data';
@@ -584,6 +585,7 @@ export default function App() {
   const dated = isSpanKey(cur) ? { title: spanName(cur), meta: S.nDays(spanDays(cur)) } : dateTitle(isDayKey(cur) ? cur : today, lang);
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <LangCtx.Provider value={lang}>
         <ThemeCtx.Provider value={t}>
@@ -625,6 +627,7 @@ export default function App() {
         </ThemeCtx.Provider>
       </LangCtx.Provider>
     </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

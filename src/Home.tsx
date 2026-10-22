@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import { Page, pieces, solo, Stream } from './Doc';
 import { ShareSheet } from './Share';
 import { StickerBox } from './StickerBox';
@@ -237,7 +238,9 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   }
   function carryTo(x: number, y: number) {
     ghostXY.setValue({ x: x - g.w / 2, y: y - g.h / 2 });
-    setOver(onPageAt(x, y));
+    /* the words make room only when where it would land moves by a few points, not on every touch event */
+    const at = onPageAt(x, y);
+    setOver((o) => (!at || !o ? at : Math.abs(at.x - o.x) < 6 && Math.abs(at.y - o.y) < 6 ? o : at));
   }
   const handlers = useRef({ dropAt, endLift, carryTo });
   useEffect(() => { handlers.current = { dropAt, endLift, carryTo }; });
@@ -300,14 +303,15 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
         </View>
       ) : (
         <Carry take={take} hold={hold} follow={follow} letGo={letGo} putBack={putBack}>
-        <Animated.ScrollView ref={scroll} scrollEnabled={!dragging} onScrollBeginDrag={scrolled} style={[StyleSheet.absoluteFill, { top: top + 50, opacity: turn }]} showsVerticalScrollIndicator={false}
+        <Animated.View style={[StyleSheet.absoluteFill, { top: top + 50, opacity: turn }]}>
+        <GHScrollView ref={scroll} scrollEnabled={!dragging} onScrollBeginDrag={scrolled} style={{ flex: 1 }} showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page key={day} items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
             preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent} onTitle={recording ? undefined : onDate}
             onDrag={setDragging} onMove={onMove} onEdit={edit} onHold={holdPara}
             chosen={choosing ?? undefined} onChoose={choosing ? choose : undefined}
-            stickers={stickers} slap={slap} onSticker={onSticker} bin={binAt} onStickerDrag={(st) => { setBin(st); setDragging(!!st); }} /> : null}
+            stickers={stickers} slap={slap} onSticker={onSticker} bin={binAt} scroll={scroll} onStickerDrag={(st) => { setBin(st); setDragging(!!st); }} /> : null}
 
           {showTray ? (
             <View style={{ gap: 10 }}>
@@ -348,7 +352,8 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
               <Text style={[h.ask, { color: t.ink, fontFamily: face.title }]}>{S.ask0}</Text>
             </View>
           ) : null}
-        </Animated.ScrollView>
+        </GHScrollView>
+        </Animated.View>
         </Carry>
       )}
 
