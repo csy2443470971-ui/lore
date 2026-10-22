@@ -2,6 +2,7 @@
 //   /transcribe   { audio: base64, mime, grammar } or form field "audio" → { raw, text, tidied, via, fixed }
 //                 gpt-transcribe, then the fix-the-stutter node, then the fix-the-mishearing node (with grammar unless grammar is false)
 //   /tidy         { text }                 → { text, via }        the fix-the-stutter node only: segments tidied while the person talks
+//   /fix          { text, grammar }        → { text, via }        the fix-the-mishearing node only: older words, when a day is laid out again
 //   /layout       { text, photos: [] }      → { spec }             premium: the layout director
 import Anthropic from '@anthropic-ai/sdk';
 import { SYSTEM, messages, tidy } from '../../core.mjs';
@@ -87,6 +88,12 @@ export default {
         const { text } = await req.json();
         if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT) return json({ error: 'bad text' }, 400);
         const out = await tidy(text, tidyCall(env, STEADY));      // stretches tidied while talking: nobody waits on them, so the cheaper model
+        return json({ text: out.text, via: out.via });
+      }
+      if (url.pathname === '/fix') {
+        const { text, grammar } = await req.json();
+        if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT) return json({ error: 'bad text' }, 400);
+        const out = await fix(text, fixCall(env, grammar !== false), grammar !== false);
         return json({ text: out.text, via: out.via });
       }
       if (url.pathname === '/layout') {
