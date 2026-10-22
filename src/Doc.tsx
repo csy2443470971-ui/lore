@@ -370,7 +370,7 @@ export function Page({ items, photos, placed, moved, preview, voice, title, meta
 
   return (
     <View style={d.page}>
-      <Text style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text>
+      {title ? <Text style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text> : null}
       {meta ? <Text style={[d.meta, { color: t.mut }]}>{meta}</Text> : null}
       <View ref={area} collapsable={false} style={{ height, marginTop: 12 }}>
         {marks.map((mk, pi) => (

@@ -14,9 +14,10 @@ import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, u
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
+export function Home({ hidden, night, past, title, onTitle, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
   hidden: boolean; night: boolean;
   past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
+  onTitle?: () => void;                              // the title opens the menu of days
   photos: Pic[]; groups: number[][]; setGroups: (g: number[][]) => void; onRemove: (idx: number[]) => void;
   said: Said[]; laid: number; placed?: Placed[]; moved?: Record<string, Pos>; making: boolean;
   live: string;                                      // Apple's live words while recording, in the installed app
@@ -300,7 +301,10 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
       <View style={[h.tb, { top, backgroundColor: t.b }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
           {past ? <Round icon="back" label={S.back} onPress={onToday} /> : null}
-          <Text numberOfLines={1} style={[past ? h.titleSm : h.title, { color: t.ink, fontFamily: face.title, flexShrink: 1 }]}>{title}</Text>
+          <Pressable onPress={onTitle} disabled={!onTitle || recording} hitSlop={8} accessibilityRole="button" style={h.titleBtn}>
+            <Text numberOfLines={1} style={[past ? h.titleSm : h.title, { color: t.ink, fontFamily: face.title, flexShrink: 1 }]}>{title}</Text>
+            {onTitle ? <Text style={[h.caret, { color: t.mut, opacity: recording ? 0.35 : 1 }]}>▾</Text> : null}
+          </Pressable>
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Round icon="cal" label={S.archive} onPress={() => onOpen('archive')} />
@@ -377,6 +381,8 @@ const h = StyleSheet.create({
   tb: { position: 'absolute', left: 0, right: 0, paddingLeft: SZ.px, paddingRight: SZ.px - 4, height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 22 },
   titleSm: { fontSize: 18 },
+  titleBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  caret: { fontSize: 13, marginTop: 3 },
   ask: { fontSize: 28, lineHeight: 38 },
   tx: { fontSize: 16, lineHeight: 29 },
   txEn: { fontSize: 17.5, lineHeight: 27 },

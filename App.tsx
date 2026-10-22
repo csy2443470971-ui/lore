@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, Platform, StyleSheet, useColorScheme, View } from 'react-native';
+import { Alert, AppState, Linking, Platform, StyleSheet, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as Haptics from 'expo-haptics';
@@ -21,6 +21,8 @@ import { dark as darkT, light as lightT } from './src/theme';
 import { DotField, LangCtx, Notice, ThemeCtx, Toast } from './src/ui';
 import { Home } from './src/Home';
 import { Archive, Insights, Settings } from './src/Screens';
+import { DayMenu } from './src/DayMenu';
+import { Week } from './src/Week';
 
 type Mode = 'light' | 'dark' | 'auto';
 type Pane = null | 'archive' | 'insights' | 'settings';
@@ -32,6 +34,11 @@ const SEED = Platform.OS === 'web' && typeof location !== 'undefined' && locatio
 /* a day's page is titled by its date until it has a title of its own; the weekday goes underneath */
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+/* the day n days after (or before) a day */
+function shift(key: string, n: number) {
+  const [y, m, d] = key.split('-').map(Number);
+  return dayKey(new Date(y, m - 1, d + n));
+}
 function dateTitle(key: string, lang: Lang) {
   const [y, m, d] = key.split('-').map(Number);
   const w = new Date(y, m - 1, d).getDay();
@@ -52,9 +59,10 @@ export default function App() {
   const [grammar, setGrammarState] = useState(true);   // "Fix grammar": on unless the person turns it off
   const [voice, setVoiceState] = useState(true);       // voice bars at the top left of what was said
   const [pane, setPane] = useState<Pane>(null);
-  const [today] = useState(() => dayKey());
+  const [today, setToday] = useState(() => dayKey());
   const [days, setDays] = useState<Record<string, Day>>(() => ({ [today]: { ...EMPTY, photos: SEED } }));
-  const [cur, setCur] = useState(today);             // a date, or 'e<n>' for a sample entry from Look back
+  const [cur, setCur] = useState(today);             // a date, 'week' for this week, or 'e<n>' for a sample entry from Look back
+  const [menu, setMenu] = useState(false);
   const [ready, setReady] = useState(false);
   const saved = useRef<Record<string, Day>>({});
   const [making, setMaking] = useState(false);
@@ -108,6 +116,32 @@ export default function App() {
   useEffect(() => {
     if (isUpdatePending && Updates.isEnabled && Date.now() - opened < 20000) Updates.reloadAsync().catch(() => {});
   }, [isUpdatePending, opened]);
+
+  /* a new day starts at midnight: the page turns to the new, empty day. While a recording is going it waits, and
+     once the recording ends asks whether to keep writing yesterday or start the new day (most will keep writing) */
+  const busy = useRef(false);
+  const roll = useRef<string | null>(null);
+  useEffect(() => {
+    const check = () => {
+      const now = dayKey();
+      if (now === today) return;
+      setToday(now);
+      if (busy.current) { roll.current = now; return; }
+      setCur((c) => (c === today ? now : c));
+    };
+    const id = setInterval(check, 20000);
+    const sub = AppState.addEventListener('change', (st) => { if (st === 'active') check(); });
+    return () => { clearInterval(id); sub.remove(); };
+  }, [today]);
+  function askRoll() {
+    const to = roll.current;
+    if (!to) return;
+    roll.current = null;
+    Alert.alert(S.midnightAsk, S.midnightBody, [
+      { text: S.newDay, onPress: () => setCur(to) },
+      { text: S.keepDay, style: 'cancel', isPreferred: true },
+    ]);
+  }
 
   const day = days[cur] ?? EMPTY;
   const update = (key: string, f: (d: Day) => Day) => setDays((m) => ({ ...m, [key]: f(m[key] ?? EMPTY) }));
@@ -227,7 +261,7 @@ export default function App() {
      In the installed app, Apple's recogniser records and shows the words live; in Expo Go, expo-audio records. */
   const rec = {
     start: async () => {
-      if (live.on && await live.start(lang)) { via.current = 'live'; return true; }
+      if (live.on && await live.start(lang)) { via.current = 'live'; busy.current = true; return true; }
       via.current = 'audio';
       try {
         const p = await requestRecordingPermissionsAsync();
@@ -235,6 +269,7 @@ export default function App() {
         await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
         await recorder.prepareToRecordAsync();
         recorder.record();
+        busy.current = true;
       } catch { /* the demo still runs without a mic */ }
       return true;
     },
@@ -244,9 +279,13 @@ export default function App() {
       if (via.current === 'live') uri = await live.stop();
       else try { if (recorder.isRecording) { await recorder.stop(); uri = recorder.uri; await setAudioModeAsync({ allowsRecording: false }); } } catch { /* ignore */ }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      busy.current = false;
+      setTimeout(askRoll, 400);
       return uri;
     },
     cancel: async () => {
+      busy.current = false;
+      setTimeout(askRoll, 400);
       if (via.current === 'live') return live.stop();
       let uri: string | null = null;
       try { if (recorder.isRecording) { await recorder.stop(); uri = recorder.uri; await setAudioModeAsync({ allowsRecording: false }); } } catch { /* ignore */ }
@@ -257,7 +296,17 @@ export default function App() {
   const isDark = mode === 'auto' ? system === 'dark' : mode === 'dark';
   const t = isDark ? darkT : lightT;
   const h = new Date().getHours();
-  const entry = isDayKey(cur) ? null : S.entries[Number(cur.slice(1))];
+  const entry = isDayKey(cur) || cur === 'week' ? null : S.entries[Number(cur.slice(1))];
+  /* the title says which day this is, and opens the menu of days: today, yesterday, the day before and this week */
+  const yest = shift(today, -1), before = shift(today, -2);
+  const nameOf = (k: string) => (k === 'week' ? S.navWeek : k === today ? S.navToday : k === yest ? S.navYesterday : k === before ? S.navBefore : dateTitle(k, lang).title);
+  const has = (k: string) => !!days[k] && (days[k].said.length > 0 || days[k].photos.length > 0);
+  const [ty, tm, td] = today.split('-').map(Number);
+  const monday = shift(today, -((new Date(ty, tm - 1, td).getDay() + 6) % 7));
+  const weekKeys: string[] = [];
+  for (let k = monday; k <= today; k = shift(k, 1)) weekKeys.push(k);
+  const menuOpts = [...[today, yest, before].map((k) => ({ key: k, label: nameOf(k), date: dateTitle(k, lang).title, has: has(k) })),
+    { key: 'week', label: S.navWeek, date: S.weekLabel, has: weekKeys.some(has) }];
   const dated = dateTitle(isDayKey(cur) ? cur : today, lang);
 
   return (
@@ -269,8 +318,12 @@ export default function App() {
             <DotField />
             {fontsLoaded && ready && (
               <>
+                {cur === 'week' ? (
+                  <Week days={days} keys={weekKeys} title={S.navWeek} voice={voice} onTitle={() => setMenu(true)} onOpen={setPane} onDay={setCur}
+                    labelOf={(k) => `${dateTitle(k, lang).meta} · ${dateTitle(k, lang).title}`} />
+                ) : (
                 <Home key={cur} hidden={pane !== null} night={h >= 18 || h < 5}
-                  past={!!entry} title={entry ? entry.when : S.navToday} onToday={() => setCur(today)}
+                  past={!!entry} title={entry ? entry.when : nameOf(cur)} onTitle={entry ? undefined : () => setMenu(true)} onToday={() => setCur(today)}
                   pageTitle={entry ? entry.t : dated.title} pageMeta={entry ? '' : dated.meta}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}
                   onRemove={(idx) => update(cur, (d) => removePhotos(d, idx))}
@@ -279,6 +332,8 @@ export default function App() {
                   placed={day.placed} moved={day.moved} onText={editText}
                   onPlace={(idx, at) => { const id = 'p' + Date.now().toString(36); update(cur, (d) => ({ ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } })); }}
                   onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))} />
+                )}
+                {menu ? <DayMenu opts={menuOpts} cur={cur} onPick={(k) => { setMenu(false); setCur(k); }} onClose={() => setMenu(false)} /> : null}
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
                 <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} />
