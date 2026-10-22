@@ -3,12 +3,12 @@
 //                 gpt-transcribe, then the fix-the-stutter node, then the fix-the-mishearing node (with grammar unless grammar is false)
 //   /tidy         { text }                 → { text, via }        the fix-the-stutter node only: segments tidied while the person talks
 //   /fix          { text, grammar }        → { text, via }        the fix-the-mishearing node only: older words, when a day is laid out again
-//   /sections     { sentences: [] }        → { sections, via }    the time-heading node: where the day moves to a new time
+//   /sections     { sentences: [] }        → { sections, breaks, via }   the time-heading node: where the day moves to a new time, and where it turns to a new subject
 //   /layout       { text, photos: [] }      → { spec }             premium: the layout director
 import Anthropic from '@anthropic-ai/sdk';
 import { SYSTEM, messages, tidy } from '../../core.mjs';
 import { fix } from '../../fix.mjs';
-import { sections } from '../../sections.mjs';
+import { sections, topics } from '../../sections.mjs';
 import { direct } from '../../director.mjs';
 
 const HINT = '普通话日记，常夹杂英文单词。Mandarin journal with English words mixed in.';
@@ -101,8 +101,9 @@ export default {
       if (url.pathname === '/sections') {
         const { sentences } = await req.json();
         if (!Array.isArray(sentences) || sentences.length > 400 || sentences.join('').length > MAX_TEXT) return json({ error: 'bad sentences' }, 400);
-        const out = await sections(sentences.map(String), (p) => together(env, STEADY, p.system, p.messages, { response_format: { type: 'json_object' } }));
-        return json({ sections: out.sections, via: out.via });
+        const call = (p) => together(env, STEADY, p.system, p.messages, { response_format: { type: 'json_object' } });
+        const [out, tp] = await Promise.all([sections(sentences.map(String), call), topics(sentences.map(String), call)]);
+        return json({ sections: out.sections, breaks: tp.breaks, via: out.via });
       }
       if (url.pathname === '/layout') {
         const { text, photos } = await req.json();

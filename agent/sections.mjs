@@ -13,6 +13,10 @@ Return JSON: {"sections": [{"sentence": n, "heading": "..."}]}, one entry for ea
 - Keep the order of the sentences; at most one entry per sentence.
 If there is none, return {"sections": []}.`;
 
+/* a second, separate call (so it can't disturb the headings): where the speaker turns to a different subject.
+   These are only places a paragraph may start; the paragraph rules in the app decide */
+export const TOPICS_SYSTEM = `You read a spoken journal entry, its sentences numbered from 0, and mark where the speaker turns to a different subject: a new event, place, person or train of thought. Leave out small turns within one subject. Return JSON: {"breaks": [n, ...]} with the numbers of the sentences that start a new subject, or {"breaks": []}.`;
+
 export const sectionsMessages = (sentences) => [
   { role: 'user', content: sentences.map((s, i) => `${i}. ${s}`).join('\n') },
 ];
@@ -38,6 +42,8 @@ export function checkSections(sentences, out) {
   }
   return kept;
 }
+/* topic breaks only suggest where a paragraph may start; any whole number inside the day is fine */
+export const checkBreaks = (sentences, out) => [...new Set((Array.isArray(out?.breaks) ? out.breaks : []).map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < sentences.length))].sort((a, b) => a - b);
 
 /* no model: a time word that opens the sentence */
 const ZH_TIME = /^(?:[，,\s]*(?:然后|接着|到了|等到|今天)?)(清早|早上|早晨|上午|中午|下午|傍晚|晚上|夜里|半夜|深夜|凌晨|下班以后|下班后|午饭后|晚饭后)/;
@@ -61,5 +67,14 @@ export async function sections(sentences, call) {
     return { sections: checkSections(sentences, j), via: 'model', inTok: r.inTok, outTok: r.outTok, ms: r.ms };
   } catch {
     return { sections: ruleSections(sentences), via: 'rules' };
+  }
+}
+export async function topics(sentences, call) {
+  if (sentences.length < 2) return { breaks: [] };
+  try {
+    const r = await call({ system: TOPICS_SYSTEM, messages: sectionsMessages(sentences) });
+    return { breaks: checkBreaks(sentences, JSON.parse(r.text.replace(/^```(?:json)?\s*|\s*```$/g, ''))) };
+  } catch {
+    return { breaks: [] };
   }
 }
