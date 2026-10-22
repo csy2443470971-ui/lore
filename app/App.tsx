@@ -315,7 +315,7 @@ export default function App() {
      turned, resized and peeled off. One made from a photo is cut out on the phone (iOS's own subject lifting). */
   function addSticker(sk: string, at: { x: number; y: number; w: number; r: number }) {
     const id = 's' + Date.now().toString(36);
-    update(cur, (d) => ({ ...d, stickers: [...(d.stickers ?? []), { id, s: sk, p: -1, ...at }] }));
+    update(cur, (d) => ({ ...d, stickers: [...(d.stickers ?? []), { id, s: sk, p: -1, ...at, wrap: true }] }));
     setSlap(id);
   }
   function moveSticker(id: string, at: Partial<Sticker> | null) {
