@@ -11,6 +11,7 @@ import { Newsreader_300Light, Newsreader_400Regular, Newsreader_400Regular_Itali
 import { Lang, STR } from './src/data';
 import { PHOTO } from './src/images';
 import { Day, removePhotos, Said } from './src/session';
+import { match } from './src/match';
 import { dark as darkT, light as lightT } from './src/theme';
 import { DotField, LangCtx, Notice, ThemeCtx, Toast } from './src/ui';
 import { Home } from './src/Home';
@@ -100,12 +101,20 @@ export default function App() {
 
   /* laying out is a step the person chooses; it takes everything said so far */
   function layout() {
-    const key = cur, n = day.said.length;
+    const key = cur;
+    /* a recording that names photos by number ("一号是…", "number two is…") is split into a part per photo here, in code */
+    const said = day.said.flatMap((x, i): Said[] => {
+      if (i < day.laid || x.kind !== 'talk' || !day.photos.length) return [x];
+      const m = match(x.text, day.photos.length);
+      if (!m.parts.length) return [x];
+      return [...(m.before ? [{ kind: 'talk' as const, text: m.before }] : []), { kind: 'photos' as const, parts: m.parts }];
+    });
+    const n = said.length;
     setMaking(true);
-    setTimeout(() => { update(key, (d) => ({ ...d, laid: n })); tipDrag(day, n); setMaking(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }, 2000);
+    setTimeout(() => { update(key, (d) => ({ ...d, said, laid: n })); tipDrag({ ...day, said }, n); setMaking(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }, 2000);
   }
 
-  /* the real microphone runs under the demo transcript */
+  /* the microphone: on the phone its recording goes to Lore's backend; the web preview shows a demo transcript */
   const rec = {
     start: async () => {
       try {
@@ -117,12 +126,17 @@ export default function App() {
       } catch { /* the demo still runs without a mic */ }
       return true;
     },
+    /* both hand back the recorded file, so it can be sent, or brought back with Undo */
     stop: async () => {
-      try { if (recorder.isRecording) { await recorder.stop(); await setAudioModeAsync({ allowsRecording: false }); } } catch { /* ignore */ }
+      let uri: string | null = null;
+      try { if (recorder.isRecording) { await recorder.stop(); uri = recorder.uri; await setAudioModeAsync({ allowsRecording: false }); } } catch { /* ignore */ }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      return uri;
     },
     cancel: async () => {
-      try { if (recorder.isRecording) { await recorder.stop(); await setAudioModeAsync({ allowsRecording: false }); } } catch { /* ignore */ }
+      let uri: string | null = null;
+      try { if (recorder.isRecording) { await recorder.stop(); uri = recorder.uri; await setAudioModeAsync({ allowsRecording: false }); } } catch { /* ignore */ }
+      return uri;
     },
   };
 

@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Page, Stream } from './Doc';
 import { Tray } from './Photos';
+import { agentOn, Heard, marked, transcribe } from './agent';
 import { Pic, Said, Unit, unitsOf } from './session';
 import { SZ } from './theme';
 import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, useTimer } from './ui';
@@ -17,7 +18,7 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
   said: Said[]; laid: number; making: boolean;
   onCamera: () => void; onPick: () => void;
   onOpen: (p: 'archive' | 'settings') => void;
-  onRecord: { start: () => Promise<boolean>; stop: () => void; cancel: () => void };
+  onRecord: { start: () => Promise<boolean>; stop: () => Promise<string | null>; cancel: () => Promise<string | null> };
   onSaved: (s: Said) => void; onLayout: () => void; onNotice: (n: Notice) => void;
 }) {
   const t = useT();
@@ -35,6 +36,8 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
   const [select, setSelect] = useState(false);
   const [sel, setSel] = useState<number[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [real, setReal] = useState<'idle' | 'listen' | 'tidy' | 'show'>('idle');   // the phone's pipeline: recording, sent, shown
+  const [heard, setHeard] = useState<Heard | null>(null);
   const secs = useTimer(rec !== 'idle');
   const fade = useState(() => new Animated.Value(1))[0];
   const tick = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -53,7 +56,24 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
   const line = (n: number) => S.demoLines[n % S.demoLines.length];
 
   function stopDemo() { if (tick.current) clearInterval(tick.current); }
+  /* on the phone: send the recording; the raw words come back with the removed ones struck through, then settle */
+  function send(uri: string) {
+    setReal('tidy');
+    transcribe(uri).then((r) => {
+      if (!r.text.trim()) { setReal('idle'); onNotice({ text: S.heardNothing }); return; }
+      setHeard(r); setReal('show');
+      setTimeout(() => { onSaved({ kind: 'talk', text: r.text }); setReal('idle'); setHeard(null); }, 1500);
+    }).catch(() => {
+      setReal('idle');
+      onNotice({ text: S.notReached, action: { label: S.retry, run: () => send(uri) } });
+    });
+  }
   function start() {
+    if (agentOn) {
+      setReal('listen');
+      onRecord.start().then((ok) => { if (!ok) { setRec('idle'); setReal('idle'); } });
+      return;
+    }
     /* no microphone permission: stop quietly, the notice says why */
     onRecord.start().then((ok) => { if (!ok) { stopDemo(); setRec('idle'); setShown(0); setK(-1); setLines({}); } });
     if (showTray && pending.length) {
@@ -83,6 +103,15 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
     return { kind: 'talk', text };
   }
   function finish(keep: boolean) {
+    if (agentOn) {
+      setRec('idle');
+      if (!keep) {
+        onRecord.cancel().then((uri) => { setReal('idle'); if (uri) onNotice({ text: S.discarded, action: { label: S.undo, run: () => send(uri) } }); });
+        return;
+      }
+      onRecord.stop().then((uri) => (uri ? send(uri) : setReal('idle')));
+      return;
+    }
     stopDemo();
     setRec('idle');
     const r = result();
@@ -116,8 +145,8 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
   const liveTalk = mode === 'talk' && (recording || shown > 0);
   const livePhotos = mode === 'photos' && recording;
   const unlaid = said.slice(laid);
-  const nothing = !said.length && !photos.length && !liveTalk && !making;
-  const canLayout = unlaid.length > 0 && !recording && !shown && !making && !select;
+  const nothing = !said.length && !photos.length && !liveTalk && !making && real === 'idle';
+  const canLayout = unlaid.length > 0 && !recording && !shown && !making && !select && real === 'idle';
   const top = ins.top + 8;
   const ctlBottom = ins.bottom + 30;
   const ctlH = SZ.talk + 28;
@@ -156,6 +185,12 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
           {unlaid.length ? <Stream items={unlaid} /> : null}
 
           {livePhotos && reached.length ? <Stream items={[{ kind: 'photos', parts: reached.map((n) => ({ unit: units[n], text: lines[n] || line(n), spoken: spoken(units[n], lines[n] || line(n)) })) }]} /> : null}
+          {real === 'tidy' ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>✦ {S.cleaning}</Text> : null}
+          {real === 'show' && heard ? (
+            <Text style={tx}>
+              {marked(heard.raw, heard.text).map(([w, kept], i) => <Text key={i} style={kept ? null : { color: t.strike, textDecorationLine: 'line-through' }}>{w}</Text>)}
+            </Text>
+          ) : null}
           {liveTalk ? (
             <Text style={tx}>
               {raw.slice(0, shown).map((w, i) => {
