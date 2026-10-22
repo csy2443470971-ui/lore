@@ -24,6 +24,8 @@ The app is an Expo / React Native prototype. The model pipeline runs on a Cloudf
    - **Free tier:** layout runs in code, with no model. Lines are broken in JavaScript around each photo's rectangle, using advance widths taken from the app's font files. Users can drag any photo, or drag one in from the tray, and the paragraphs reflow on every frame. A tap on a line opens its words for editing.
    - **Premium tier:** the layout director (Claude Haiku 5.5, structured output) picks a title, a template, a quote and a hero photo. Code checks that the title uses only the writer's words and that the quote appears in the text exactly.
 
+   At Lay out, one call to DeepSeek V4 Flash also marks where the day moves to a new time ("下午", "after lunch"), and a small heading goes there in the speaker's own words; code checks that each heading appears in its sentence. Each stretch of talking keeps a voice bar at its top left; recordings stay in one bar while each starts within 20 minutes of the last one ending.
+
    A laid-out day can be laid out again. Older words then get the misheard-word and grammar fix once, and are matched to photos again.
 
 ## Choosing the models
