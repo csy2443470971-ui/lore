@@ -8,6 +8,7 @@ import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import { Page, pieces, solo, Stream } from './Doc';
 import { ShareSheet } from './Share';
 import { StickerBox } from './StickerBox';
+import { Viewer } from './Viewer';
 import { Mosaic, src, Tray } from './Photos';
 import { agentOn, Heard, marked, transcribe } from './agent';
 import { Pic, Placed, Pos, Said, Sticker, Unit, unitsOf } from './session';
@@ -17,7 +18,7 @@ import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, u
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onUndo, onMerge, onNotice, stickers, slap, mine, onAddSticker, onSticker, onMakeSticker }: {
+export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onUndo, onMerge, onNotice, stickers, slap, mine, onAddSticker, onSticker, onMakeSticker, onPhoto }: {
   hidden: boolean; night: boolean;
   day: string;                                      // which day is shown; switching days keeps this screen and swaps only the page
   past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
@@ -37,6 +38,8 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   onAddSticker: (s: string, at: { x: number; y: number; w: number; r: number }) => void;
   onSticker: (id: string, at: Partial<Sticker> | null) => void;
   onMakeSticker: () => Promise<string | null>;        // a sticker cut out of a photo, or null
+  /* from the full-screen photo: delete it, set marks into it, go back to the original, or keep a cut-out sticker */
+  onPhoto: { del: (i: number) => void; save: (i: number, uri: string, r: number) => void; restore: (i: number) => void; lifted: (file: string) => string };
   onMerge: (item: number) => void;                    // join a paragraph to the one above it
   onSaved: (s: Said) => void; onLayout: () => void; onNotice: (n: Notice) => void;
   onText: (item: number, part: number, text: string) => void;   // an edited recording, or an edited photo caption (part)
@@ -68,7 +71,8 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   const [choosing, setChoosing] = useState<Set<string> | null>(null);   // choosing paragraphs and photos for a share image
   const [sharing, setSharing] = useState(false);
   const [stickerBox, setStickerBox] = useState(false);                  // the sticker box is open
-  const [reading, setReading] = useState<string | null>(null);          // a paragraph opened to select (and copy) its words
+  const [reading, setReading] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<{ idx: number[]; at: number } | null>(null);   // a photo open full screen          // a paragraph opened to select (and copy) its words
   const [bin, setBin] = useState<'on' | 'over' | null>(null);           // a sticker is being carried: the bin shows in the talk key's place
   const [draft, setDraft] = useState('');
   const lift = useRef<{ u: Unit; moved: boolean; carried: boolean } | null>(null);   // a tray photo picked up by a long press
@@ -301,6 +305,7 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
             preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent} onTitle={recording ? undefined : onDate}
             onDrag={setDragging} onMove={onMove} onEdit={edit}
             onMerge={recording ? undefined : onMerge} onShare={(item) => setChoosing(new Set([`t${item}`]))} onSelect={setReading}
+            onOpen={(idx) => setViewing({ idx, at: 0 })}
             chosen={choosing ?? undefined} onChoose={choosing ? choose : undefined}
             stickers={stickers} slap={slap} onSticker={onSticker} bin={binAt} scroll={scroll} onStickerDrag={setBin} /> : null}
 
@@ -438,6 +443,12 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
         );
       })() : null}
 
+      {viewing ? (
+        <Viewer pics={viewing.idx.map((i) => photos[i]).filter(Boolean)} start={viewing.at} mine={mine} onClose={() => setViewing(null)}
+          onDelete={(k) => { const i = viewing.idx[k]; const rest = viewing.idx.filter((_, j) => j !== k).map((n) => (n > i ? n - 1 : n)); onPhoto.del(i); setViewing(rest.length ? { idx: rest, at: Math.min(k, rest.length - 1) } : null); }}
+          onSave={(k, uri, r) => onPhoto.save(viewing.idx[k], uri, r)} onRestore={(k) => onPhoto.restore(viewing.idx[k])}
+          onLifted={(file) => putSticker(onPhoto.lifted(file))} onNotice={(text) => onNotice({ text })} />
+      ) : null}
       {reading !== null ? (
         <View style={[StyleSheet.absoluteFill, h.editWrap]}>
           <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: t.ink + '2E' }]} onPress={() => setReading(null)} />
