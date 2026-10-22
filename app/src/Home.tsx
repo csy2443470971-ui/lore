@@ -14,7 +14,7 @@ import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, u
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
+export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onUndo, onMerge, onNotice }: {
   hidden: boolean; night: boolean;
   day: string;                                      // which day is shown; switching days keeps this screen and swaps only the page
   past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
@@ -29,6 +29,8 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   onCamera: () => void; onPick: () => void;
   onOpen: (p: 'archive' | 'settings') => void;
   onRecord: { start: () => Promise<boolean>; stop: () => Promise<string | null>; cancel: () => Promise<string | null> };
+  onUndo?: () => void;                               // back to the page as it was before the last lay out, join or edit
+  onMerge: (item: number) => void;                    // join a paragraph to the one above it
   onSaved: (s: Said) => void; onLayout: () => void; onNotice: (n: Notice) => void;
   onText: (item: number, part: number, text: string) => void;   // an edited recording, or an edited photo caption (part)
   onPlace: (idx: number[], at: Pos) => void; onMove: (key: string, at: Pos) => void;
@@ -231,6 +233,14 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   useEffect(() => { handlers.current = { dropAt, endLift, carryTo }; });
   const take = useCallback(() => { if (!lift.current) return false; lift.current.moved = true; return true; }, []);
   const hold = useCallback(() => { if (lift.current) lift.current.carried = true; }, []);
+  /* a long press on a paragraph offers to join it to the one above */
+  const holdPara = (item: number) => {
+    if (recording) return;
+    Haptics.selectionAsync().catch(() => {});
+    if (Platform.OS === 'ios') ActionSheetIOS.showActionSheetWithOptions({ options: [S.mergeUp, S.cancel], cancelButtonIndex: 1 }, (b) => { if (b === 0) onMerge(item); });
+    else if (Platform.OS === 'web') { if (window.confirm(S.mergeUp)) onMerge(item); }
+    else Alert.alert('', '', [{ text: S.mergeUp, onPress: () => onMerge(item) }, { text: S.cancel, style: 'cancel' }]);
+  };
   const scrolled = useCallback(() => { if (lift.current) lift.current.moved = true; }, []);
   const follow = useCallback((x: number, y: number) => handlers.current.carryTo(x, y), []);
   const letGo = useCallback((x: number, y: number) => handlers.current.dropAt(x, y), []);
@@ -265,7 +275,7 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page key={day} items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
             preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent} onTitle={recording ? undefined : onDate}
-            onDrag={setDragging} onMove={onMove} onEdit={edit} /> : null}
+            onDrag={setDragging} onMove={onMove} onEdit={edit} onHold={holdPara} /> : null}
 
           {showTray ? (
             <View style={{ gap: 10 }}>
@@ -335,8 +345,18 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
         </View>
       ) : canRelayout ? (
         <View style={[h.layoutWrap, { bottom: ctlBottom + ctlH + 16 }]} pointerEvents="box-none">
-          <Text style={[h.relayoutHint, { color: t.mut, fontFamily: face.body }]}>{S.relayoutHint}</Text>
-          <Round icon="layout" label={S.relayoutHint} onPress={onLayout} />
+          <View style={h.again}>
+            {onUndo ? (
+              <View style={h.againOne}>
+                <Text style={[h.relayoutHint, { color: t.mut, fontFamily: face.body }]}>{S.back1}</Text>
+                <Round icon="undo" label={S.back1} onPress={onUndo} />
+              </View>
+            ) : null}
+            <View style={h.againOne}>
+              <Text style={[h.relayoutHint, { color: t.mut, fontFamily: face.body }]}>{S.relayoutHint}</Text>
+              <Round icon="layout" label={S.relayoutHint} onPress={onLayout} />
+            </View>
+          </View>
         </View>
       ) : null}
 
@@ -408,6 +428,8 @@ const h = StyleSheet.create({
   layoutWrap: { position: 'absolute', left: SZ.px, right: SZ.px, alignItems: 'center', gap: 8 },
   layoutHint: { fontSize: 13, textAlign: 'center' },
   relayoutHint: { fontSize: 11.5, textAlign: 'center' },
+  again: { flexDirection: 'row', gap: 28 },
+  againOne: { alignItems: 'center', gap: 8 },
   layout: { height: 38, paddingHorizontal: 22, borderRadius: 19, justifyContent: 'center' },
   ctl: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'flex-start' },
   selRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: (SZ.talk - SZ.key) / 2 },

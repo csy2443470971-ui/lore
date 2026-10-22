@@ -150,6 +150,48 @@ export default function App() {
 
   const day = days[cur] ?? EMPTY;
   const update = (key: string, f: (d: Day) => Day) => setDays((m) => ({ ...m, [key]: f(m[key] ?? EMPTY) }));
+  /* Undo: each day keeps how its page was before the last ten lay outs, joined paragraphs and edits, while the app is open.
+     Going back restores the laid-out page; anything said since then and not laid out yet stays */
+  const [past, setPast] = useState<Record<string, Day[]>>({});
+  const remember = (key: string, d: Day) => setPast((m) => ({ ...m, [key]: [...(m[key] ?? []).slice(-9), d] }));
+  function undo() {
+    const key = cur, stack = past[key], snap = stack?.[stack.length - 1];
+    if (!snap) return;
+    setPast((m) => ({ ...m, [key]: stack.slice(0, -1) }));
+    update(key, (d) => ({ ...d, said: [...snap.said.slice(0, snap.laid), ...d.said.slice(d.laid)], laid: snap.laid, placed: snap.placed, moved: snap.moved }));
+    Haptics.selectionAsync().catch(() => {});
+  }
+
+  /* a long press on a paragraph joins it to the one above: the words run on, its recordings play after that paragraph's,
+     and a time heading between the two goes */
+  function mergeUp(item: number) {
+    const d = day, x = d.said[item];
+    let j = item - 1;
+    while (j >= 0 && d.said[j].kind === 'head') j--;
+    const prev = d.said[j];
+    if (!x || x.kind === 'head' || !prev || prev.kind === 'head' || item >= d.laid) return;
+    const more = [...(prev.more ?? []), ...(x.audio ? [{ audio: x.audio, at: x.at, secs: x.secs }] : []), ...(x.more ?? [])];
+    const g = !!(prev.g && x.g);
+    const joined: Said = prev.kind === 'talk' && x.kind === 'talk' ? { ...prev, text: join([prev.text, x.text]), more, g }
+      : prev.kind === 'photos' && x.kind === 'talk' ? { ...prev, more, g, parts: prev.parts.map((p, k) => (k === prev.parts.length - 1 ? { ...p, text: join([p.text, x.text]), spoken: undefined } : p)) }
+      : prev.kind === 'talk' && x.kind === 'photos' ? { ...x, audio: prev.audio, at: prev.at, secs: prev.secs, more, g, parts: x.parts.map((p, k) => (k === 0 ? { ...p, text: join([prev.text, p.text]), spoken: undefined } : p)) }
+      : prev.kind === 'photos' && x.kind === 'photos' ? { ...prev, more, g, parts: [...prev.parts, ...x.parts] } : prev;
+    const gone = item - j;
+    /* photos beside paragraphs are kept by item and part; those after the join move up */
+    const shift = prev.kind === 'photos' && x.kind === 'photos' ? prev.parts.length : 0;
+    const re = (k: string) => {
+      const m = /^(\d+)-(\d+)$/.exec(k);
+      if (!m) return k;
+      const i = +m[1], p = +m[2];
+      return i === item ? `${j}-${p + shift}` : i > item ? `${i - gone}-${p}` : k;
+    };
+    remember(cur, d);
+    update(cur, () => ({
+      ...d, said: [...d.said.slice(0, j), joined, ...d.said.slice(item + 1)], laid: d.laid - gone,
+      moved: d.moved && Object.fromEntries(Object.entries(d.moved).map(([k, v]) => [re(k), v])),
+    }));
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }
   const settings = { label: S.openSettings, run: () => { Linking.openSettings().catch(() => {}); } };
 
   /* open an entry from Look back on the writing page; the sample entries become a laid-out page the first time */
@@ -222,6 +264,7 @@ export default function App() {
 
   /* an edited recording, or an edited caption of one photo; emptied words stay as an empty entry, so nothing else moves */
   function editText(item: number, part: number, text: string) {
+    remember(cur, day);
     update(cur, (d) => ({
       ...d,
       said: d.said.map((x, i) => (i !== item || x.kind === 'head' ? x : x.kind === 'talk' ? { ...x, text, g: true }
@@ -282,6 +325,7 @@ export default function App() {
     const n = said.length;
     /* a photo now talked about leaves the spot it was dropped on and goes beside its words; where photos beside
        paragraphs were dragged to is forgotten, since the paragraphs may have changed */
+    remember(key, d0);
     update(key, (d) => ({
       ...d, said, laid: n,
       placed: d.placed?.filter((p) => !p.idx.some((i) => taken.has(i))),
@@ -361,9 +405,9 @@ export default function App() {
                   past={!!entry} title={entry ? entry.when : nameOf(cur)} onTitle={entry ? undefined : () => setMenu(true)} onDate={entry ? undefined : () => setPicking(true)} onToday={() => setCur(today)}
                   pageTitle={entry ? entry.t : dated.title} pageMeta={entry ? '' : dated.meta}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}
-                  onRemove={(idx) => update(cur, (d) => removePhotos(d, idx))}
+                  onRemove={(idx) => { setPast((m) => ({ ...m, [cur]: [] })); update(cur, (d) => removePhotos(d, idx)); }}
                   said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} indent={indent} onCamera={shoot} onPick={pick} onOpen={setPane} onRecord={rec}
-                  onSaved={(x) => update(cur, (d) => ({ ...d, said: [...d.said, x] }))} onLayout={layout} onNotice={setNotice}
+                  onSaved={(x) => update(cur, (d) => ({ ...d, said: [...d.said, x] }))} onLayout={layout} onUndo={past[cur]?.length ? undo : undefined} onMerge={mergeUp} onNotice={setNotice}
                   placed={day.placed} moved={day.moved} onText={editText}
                   onPlace={(idx, at) => { const id = 'p' + Date.now().toString(36); update(cur, (d) => ({ ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } })); }}
                   onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))} />

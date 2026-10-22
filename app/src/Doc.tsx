@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Dimensions, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { AudioPlayer, createAudioPlayer, setAudioModeAsync } from 'expo-audio';
@@ -144,20 +144,59 @@ function toSpot(key: string, x: number, y: number, w: number, h: number, base: {
 }
 
 /* one photo (or group) on the page that can be dragged anywhere with one finger, and made bigger or smaller with two;
-   the words get out of its way. The responder is made once, so a drag isn't reset as the position updates under the finger. */
+   the words get out of its way. While it is held, the photo is drawn exactly where the finger has it, as an offset and a
+   scale over the place the page keeps for it (so following the finger re-renders nothing); let go, it springs into that
+   place. The responder is made once, so a drag isn't reset as the page reflows under the finger. */
 function Movable({ id, r, z, grab, drag, pinch, drop, children }: {
-  id: string; r: Rect; z: number; grab: (id: string) => void; drag: (id: string, dx: number, dy: number) => void;
-  pinch: (id: string, scale: number) => void; drop: () => void; children: React.ReactNode;
+  id: string; r: Rect; z: number; grab: (id: string, from: Rect) => void;
+  drag: (id: string, dx: number, dy: number) => Rect | null; pinch: (id: string, scale: number) => Rect | null;
+  drop: () => void; children: React.ReactNode;
 }) {
   const lift = useState(() => new Animated.Value(1))[0];
+  const pan = useState(() => new Animated.ValueXY())[0];
+  const grow = useState(() => new Animated.Value(1))[0];
+  const hold = useRef({ r, held: false, want: null as Rect | null, off: { x: 0, y: 0 }, g: 1 });
+  useEffect(() => {
+    const a = pan.addListener((v) => { hold.current.off = v; });
+    const b = grow.addListener((v) => { hold.current.g = v.value; });
+    return () => { pan.removeListener(a); grow.removeListener(b); };
+  }, [pan, grow]);
+  const show = useCallback((to: Rect, base: Rect) => {
+    hold.current.off = { x: to.x - base.x, y: to.y - base.y }; hold.current.g = to.w / base.w;
+    pan.setValue(hold.current.off); grow.setValue(hold.current.g);
+  }, [pan, grow]);
+  const home = useCallback(() => {
+    const spring = { useNativeDriver: true, friction: 9, tension: 80 };
+    Animated.parallel([Animated.spring(pan, { ...spring, toValue: { x: 0, y: 0 } }), Animated.spring(grow, { ...spring, toValue: 1 })])
+      .start(({ finished }) => { if (finished) hold.current.want = null; });
+  }, [pan, grow]);
+  /* the page moved the photo's place (the words reflowed, or it was let go): keep it where it is on screen */
+  useLayoutEffect(() => {
+    const s0 = hold.current, prev = s0.r;
+    s0.r = r;
+    if (prev.x === r.x && prev.y === r.y && prev.w === r.w) return;
+    if (s0.held && s0.want) show(s0.want, r);
+    else if (s0.want) { show(s0.want, r); home(); }
+  }, [r, show, home]);
   const pr = useMemo(() => {
     const two = { spread: 0 };                     // the distance between two fingers when the second one came down
-    const settle = () => { two.spread = 0; drop(); Animated.spring(lift, { toValue: 1, useNativeDriver: true, friction: 6 }).start(); };
+    const to = (want: Rect | null) => { if (want) { hold.current.want = want; show(want, hold.current.r); } };
+    const settle = () => {
+      two.spread = 0; hold.current.held = false;
+      drop();
+      home();
+      Animated.spring(lift, { toValue: 1, useNativeDriver: true, friction: 6 }).start();
+    };
+    /* the handlers only run during a gesture, never while rendering */
+    // eslint-disable-next-line react-hooks/refs
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
-        grab(id);
+        pan.stopAnimation(); grow.stopAnimation();
+        const s0 = hold.current, from = { x: s0.r.x + s0.off.x, y: s0.r.y + s0.off.y, w: s0.r.w * s0.g, h: s0.r.h * s0.g };
+        s0.held = true; s0.want = from;
+        grab(id, from);
         Haptics.selectionAsync().catch(() => {});
         Animated.spring(lift, { toValue: 1.04, useNativeDriver: true, friction: 6 }).start();
       },
@@ -166,17 +205,19 @@ function Movable({ id, r, z, grab, drag, pinch, drop, children }: {
         if (tt.length >= 2) {
           const dist = Math.hypot(tt[0].pageX - tt[1].pageX, tt[0].pageY - tt[1].pageY);
           if (!two.spread) two.spread = dist || 1;
-          pinch(id, dist / two.spread);
-        } else if (!two.spread) drag(id, g.dx, g.dy);   // once pinched, lifting one finger doesn't make the photo jump
+          to(pinch(id, dist / two.spread));
+        } else if (!two.spread) to(drag(id, g.dx, g.dy));   // once pinched, lifting one finger doesn't make the photo jump
       },
       onPanResponderRelease: settle,
       onPanResponderTerminate: settle,
     });
-  }, [id, grab, drag, pinch, drop, lift]);
+  }, [id, grab, drag, pinch, drop, lift, pan, grow, show, home]);
   return (
-    <Animated.View {...pr.panHandlers} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, zIndex: z, transform: [{ scale: lift }] }}>
-      {/* the photo itself takes no touches: on the web an <img> would start the browser's own image drag and end ours */}
-      <View pointerEvents="none" style={StyleSheet.absoluteFill}>{children}</View>
+    <Animated.View {...pr.panHandlers} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, zIndex: z, transformOrigin: 'top left', transform: [...pan.getTranslateTransform(), { scale: grow }] }}>
+      <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: lift }] }]}>
+        {/* the photo itself takes no touches: on the web an <img> would start the browser's own image drag and end ours */}
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>{children}</View>
+      </Animated.View>
     </Animated.View>
   );
 }
@@ -203,7 +244,7 @@ export const solo = (w: number) => cluster(1, w)[0];
    English lines up at both edges like Chinese. Drag any photo and the paragraphs reflow around it; where it ends up
    is kept. A photo carried in from the tray (preview) moves the words before it is let go. Tap a word to edit it. */
 type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
-export function Page({ items, photos, placed, moved, preview, voice, indent, onTitle, title, meta, area, onDrag, onMove, onEdit }: {
+export function Page({ items, photos, placed, moved, preview, voice, indent, onTitle, title, meta, area, onDrag, onMove, onEdit, onHold }: {
   items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; preview?: { pics: Pic[]; x: number; y: number } | null;
   voice?: boolean;                                                // voice bars at the top left of what was said (a setting)
   indent?: boolean;                                               // first-line indent (a setting)
@@ -211,6 +252,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   title: string; meta: string;
   area?: React.RefObject<View | null>;                           // the text area, for finding where a photo from the tray was dropped
   onDrag: (on: boolean) => void; onMove: (key: string, at: Pos) => void; onEdit: (item: number, part: number) => void;
+  onHold?: (item: number) => void;                               // a long press on a paragraph (after the first): offer to join it to the one above
 }) {
   const t = useT();
   const face = useFace();
@@ -301,7 +343,6 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
 
   /* where each photo was when the finger went down; read only inside the gesture handlers */
   const now = useRef({ rects: {} as Record<string, Rect>, base, sizes: {} as Record<string, { w: number; h: number }> });
-  const origin = useRef({ x: 0, y: 0 });
   const last = useRef<{ id: string; at: Pos } | null>(null);
   const moveTo = useRef(onMove);
   useEffect(() => {
@@ -314,37 +355,55 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   /* positions read from an older version are saved once in paragraph and line */
   const freshKey = JSON.stringify(fresh);
   useEffect(() => { for (const [k, at] of JSON.parse(freshKey) as [string, Pos][]) moveTo.current(k, at); }, [freshKey]);
-  const grab = useCallback((id: string) => {
-    const r = now.current.rects[id]; if (r) origin.current = { x: r.x, y: r.y };
+  /* the photo under the finger, as it was when picked up: where it was drawn, and its size on the page */
+  const held = useRef({ x: 0, y: 0, w: 0, h: 0 });
+  /* the words reflow only when the photo's place really changes (its paragraph, line, or a few points across), at most once a frame */
+  const shown = useRef('');
+  const frame = useRef(0);
+  const place = useCallback((id: string, at: Pos) => {
+    last.current = { id, at };
+    const sig = `${id}|${at.p}|${at.k}|${at.x}|${at.w}`;
+    if (sig === shown.current) return;
+    shown.current = sig;
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
+  }, []);
+  const grab = useCallback((id: string, from: Rect) => {
+    const sz = now.current.sizes[id] ?? { w: from.w, h: from.h };
+    held.current = { x: from.x, y: from.y, w: sz.w, h: sz.h };
+    shown.current = ''; last.current = null;
     setFront(id); onDrag(true);
   }, [onDrag]);
-  const drag = useCallback((id: string, dx: number, dy: number) => {
-    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
-    const sz = now.current.sizes[id] ?? { w: 0, h: 0 };
-    const y = Math.max(0, origin.current.y + dy);
-    const sp = toSpot(id, origin.current.x + dx, y, sz.w, sz.h, now.current.base, W, lh, size);
-    const at = { x: sp.x, y, p: sp.p, k: sp.k, w: sz.w };
-    last.current = { id, at };
-    setLive((s) => ({ ...s, [id]: at }));
-  }, [W, lh, size]);
-  /* two fingers: the photo grows or shrinks from its top-left corner, between a quarter of the page and all of it */
-  const pinch = useCallback((id: string, scale: number) => {
-    const sz = now.current.sizes[id] ?? { w: 0, h: 0 };
-    if (!sz.w || !Number.isFinite(scale)) return;
-    const w = Math.round(Math.max(W * 0.25, Math.min(W, sz.w * scale))), h = sz.h * w / sz.w;
-    const sp = toSpot(id, Math.min(origin.current.x, W - w), origin.current.y, w, h, now.current.base, W, lh, size);
-    const at = { x: sp.x, y: origin.current.y, p: sp.p, k: sp.k, w };
-    last.current = { id, at };
-    setLive((s) => ({ ...s, [id]: at }));
-  }, [W, lh, size]);
+  const q = (v: number) => Math.round(v / 4) * 4;  // positions kept in steps of 4 points, so the words don't reflow for every pixel
+  const drag = useCallback((id: string, dx: number, dy: number): Rect | null => {
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null;
+    const hd = held.current;
+    const x = Math.max(0, Math.min(W - hd.w, hd.x + dx)), y = Math.max(0, hd.y + dy);
+    const sp = toSpot(id, x, y, hd.w, hd.h, now.current.base, W, lh, size);
+    place(id, { x: q(sp.x), y, p: sp.p, k: sp.k, w: hd.w });
+    return { x, y, w: hd.w, h: hd.h };
+  }, [W, lh, size, place]);
+  /* two fingers: the photo grows or shrinks from its top-left corner, between a quarter of the page and all of it,
+     always measured against its size when the fingers came down */
+  const pinch = useCallback((id: string, scale: number): Rect | null => {
+    const hd = held.current;
+    if (!hd.w || !Number.isFinite(scale)) return null;
+    const w = Math.max(W * 0.25, Math.min(W, hd.w * scale)), h = hd.h * w / hd.w, x = Math.min(hd.x, W - w);
+    const sp = toSpot(id, x, hd.y, q(w), h, now.current.base, W, lh, size);
+    place(id, { x: q(sp.x), y: hd.y, p: sp.p, k: sp.k, w: q(w) });
+    return { x, y: hd.y, w, h };
+  }, [W, lh, size, place]);
   const drop = useCallback(() => {
-    if (last.current) moveTo.current(last.current.id, last.current.at);
+    cancelAnimationFrame(frame.current);
+    const lt = last.current;
+    if (lt) { setLive((s) => ({ ...s, [lt.id]: lt.at })); moveTo.current(lt.id, lt.at); }
     last.current = null;
     onDrag(false);
   }, [onDrag]);
 
   /* a tap edits the words under the finger: their recording, or the caption of the photo they belong to */
   const edit = (p: number, o: number) => { const sr = srcs[p].reduce((r, c) => (c.from <= o ? c : r), srcs[p][0]); onEdit(sr.item, sr.part); };
+  const hold = (p: number) => (p > 0 && onHold ? () => onHold(srcs[p][0].item) : undefined);
   const ink = { position: 'absolute' as const, fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body };
   /* justified: the room left on a line goes between its words (or characters); the last line of a paragraph, and a
      line where the gaps would grow wide, stay set to the left */
@@ -362,7 +421,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
       const ls = each ? Math.max(0, (room - 2) / toks.length) : room < 0 ? (room - 1) / toks.length : 0;
       const step = (x: number) => Math.max(0, Math.min(toks.length - 1, Math.floor(x / ((natural / toks.length) + ls))));
       return (
-        <Text key={li} numberOfLines={1} ellipsizeMode="clip" onPress={(ev) => edit(l.p, toks[step(ev.nativeEvent.locationX)].o)}
+        <Text key={li} numberOfLines={1} ellipsizeMode="clip" onPress={(ev) => edit(l.p, toks[step(ev.nativeEvent.locationX)].o)} onLongPress={hold(l.p)}
           style={[ink, { left: l.x, top: l.y, letterSpacing: ls }]}>{toks.map((tk) => tk.s).join('')}</Text>
       );
     }
@@ -370,7 +429,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     return toks.map((tk, j) => {
       const at = x;
       x += tk.full + (j < toks.length - 1 && !NO_START.test(toks[j + 1].s) ? each : 0);
-      return <Text key={`${li}-${j}`} numberOfLines={1} onPress={() => edit(l.p, tk.o)} style={[ink, { left: at, top: l.y }]}>{tk.s.trimEnd()}</Text>;
+      return <Text key={`${li}-${j}`} numberOfLines={1} onPress={() => edit(l.p, tk.o)} onLongPress={hold(l.p)} style={[ink, { left: at, top: l.y }]}>{tk.s.trimEnd()}</Text>;
     });
   };
 
