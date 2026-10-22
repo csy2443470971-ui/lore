@@ -3,10 +3,12 @@
 //                 gpt-transcribe, then the fix-the-stutter node, then the fix-the-mishearing node (with grammar unless grammar is false)
 //   /tidy         { text }                 → { text, via }        the fix-the-stutter node only: segments tidied while the person talks
 //   /fix          { text, grammar }        → { text, via }        the fix-the-mishearing node only: older words, when a day is laid out again
+//   /sections     { sentences: [] }        → { sections, via }    the time-heading node: where the day moves to a new time
 //   /layout       { text, photos: [] }      → { spec }             premium: the layout director
 import Anthropic from '@anthropic-ai/sdk';
 import { SYSTEM, messages, tidy } from '../../core.mjs';
 import { fix } from '../../fix.mjs';
+import { sections } from '../../sections.mjs';
 import { direct } from '../../director.mjs';
 
 const HINT = '普通话日记，常夹杂英文单词。Mandarin journal with English words mixed in.';
@@ -25,10 +27,10 @@ async function transcribe(env, audio, extra) {
 
 /* DeepSeek V4.1 Flash answers in about 0.2 s; V4 Flash is slower but keeps to "words only" best (eval/fix.mjs) */
 const FAST = 'deepseek-ai/DeepSeek-V4.1-Flash', STEADY = 'deepseek-ai/DeepSeek-V4-Flash-0731';
-async function together(env, model, system, msgs) {
+async function together(env, model, system, msgs, extra = {}) {
   const r = await fetch('https://api.together.xyz/v1/chat/completions', {
     method: 'POST', headers: { Authorization: `Bearer ${env.TOGETHER_API_KEY}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model, temperature: 0, max_tokens: 2000, reasoning: { enabled: false }, messages: [{ role: 'system', content: system }, ...msgs] }),
+    body: JSON.stringify({ model, temperature: 0, max_tokens: 2000, reasoning: { enabled: false }, messages: [{ role: 'system', content: system }, ...msgs], ...extra }),
   });
   if (!r.ok) throw new Error(`together ${r.status}`);
   const j = await r.json();
@@ -95,6 +97,12 @@ export default {
         if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT) return json({ error: 'bad text' }, 400);
         const out = await fix(text, fixCall(env, grammar !== false), grammar !== false);
         return json({ text: out.text, via: out.via });
+      }
+      if (url.pathname === '/sections') {
+        const { sentences } = await req.json();
+        if (!Array.isArray(sentences) || sentences.length > 400 || sentences.join('').length > MAX_TEXT) return json({ error: 'bad sentences' }, 400);
+        const out = await sections(sentences.map(String), (p) => together(env, STEADY, p.system, p.messages, { response_format: { type: 'json_object' } }));
+        return json({ sections: out.sections, via: out.via });
       }
       if (url.pathname === '/layout') {
         const { text, photos } = await req.json();

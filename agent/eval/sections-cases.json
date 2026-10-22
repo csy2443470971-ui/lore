@@ -1,0 +1,10 @@
+[
+  {"id": "zh-day", "sentences": ["早上起来先去跑了五公里。", "跑完在楼下吃了碗面。", "下午一直在图书馆写论文，写得头都大了。", "晚上和小林去吃火锅，聊到快十二点。"], "want": [[0, "早上"], [2, "下午"], [3, "晚上"]]},
+  {"id": "en-day", "sentences": ["So this morning I went to the farmers market.", "I bought some basil and peaches.", "In the afternoon I had a call with my manager.", "It went fine, honestly.", "Tonight I'm just going to read."], "want": [[0, "morning"], [2, "afternoon"], [4, "tonight"]]},
+  {"id": "mix-day", "sentences": ["今天 morning 先去了 gym。", "然后中午跟 Amy 吃了 ramen。", "下班以后去 Trader Joe's 买菜。"], "want": [[0, "morning"], [1, "中午"], [2, "下班"]]},
+  {"id": "en-clock", "sentences": ["I woke up late.", "At 3 pm I finally made it to the studio.", "We recorded two songs."], "want": [[1, "3"]]},
+  {"id": "en-passing", "sentences": ["I was tired all afternoon, I don't know why.", "The talk was about public data and design.", "I grabbed food and stood alone while everyone was networking."], "want": []},
+  {"id": "zh-none", "sentences": ["今天没什么特别的。", "就是觉得有点累。", "想早点睡。"], "want": []},
+  {"id": "en-after", "sentences": ["The morning was all meetings.", "After lunch I walked to the bridge.", "The lake turned orange-pink at sunset."], "want": [[0, "morning"], [1, "lunch"]]},
+  {"id": "zh-breakfast", "sentences": ["吃完早饭去上课。", "课上老师讲了半天统计。", "回到宿舍已经很累了。"], "want": [[0, "早饭"]]}
+]
