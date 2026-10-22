@@ -19,7 +19,7 @@ export const dark: Theme = {
 };
 
 /* sizes from the chosen baseline, with the smaller controls */
-export const SZ = { px: 20, round: 36, key: 46, talk: 58, tileR: 10, tileGap: 5, panelR: 26, stageR: 28 };
+export const SZ = { px: 20, round: 40, key: 46, talk: 58, tileR: 10, tileGap: 5, panelR: 26, stageR: 28 };
 
 export const F = {
   cn: 'NotoSerifSC-400',

@@ -225,7 +225,8 @@ function Sub({ k, sub, children }: { k: string; sub: string; children?: React.Re
     </View>
   );
 }
-function WritingStyle() {
+/* filler words always go; grammar is fixed unless turned off (both by Lore's backend); learning a style is not built yet */
+function WritingStyle({ grammar, setGrammar }: { grammar: boolean; setGrammar: (g: boolean) => void }) {
   const t = useT();
   const S = useS();
   const [train, setTrain] = useState(false);
@@ -241,7 +242,7 @@ function WritingStyle() {
       <Text style={{ fontSize: 16, fontWeight: '500', color: t.ink }}>{S.sStyle}</Text>
       <Text style={{ fontSize: 13.5, lineHeight: 20, color: t.mut, marginTop: 3, marginBottom: 4 }}>{S.sStyleSub}</Text>
       <Sub k={S.wsClean} sub={S.wsCleanSub}><Toggle on locked /></Sub>
-      <Sub k={S.wsGrammar} sub={S.wsGrammarSub}><Toggle on={false} /></Sub>
+      <Sub k={S.wsGrammar} sub={S.wsGrammarSub}><Toggle key={String(grammar)} on={grammar} onChange={setGrammar} /></Sub>
       <Sub k={S.wsTrain} sub={S.wsTrainSub}><Toggle on={false} onChange={setTrain} /></Sub>
       {train && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 6 }}>
@@ -258,8 +259,9 @@ function Reminders() {
   return <Row k={S.sRemind} sub={S.sRemindSub} extra={<Seg value={r} onChange={setR} options={[['night', S.rNight], ['week', S.rWeek], ['off', S.rOff]]} />} />;
 }
 
-export function Settings({ open, onClose, mode, setMode, lang, setLang }: {
+export function Settings({ open, onClose, mode, setMode, lang, setLang, grammar, setGrammar }: {
   open: boolean; onClose: () => void; mode: Mode; setMode: (m: Mode) => void; lang: Lang; setLang: (l: Lang) => void;
+  grammar: boolean; setGrammar: (g: boolean) => void;
 }) {
   const t = useT();
   const S = useS();
@@ -271,11 +273,11 @@ export function Settings({ open, onClose, mode, setMode, lang, setLang }: {
         <Text style={[a.lede, { color: t.mut, fontFamily: face.italic, marginTop: 0, marginBottom: 18 }]}>{S.setLede}</Text>
         <Row k={S.sLook} sub={S.sLookSub} extra={<Seg value={mode} onChange={setMode} options={[['light', S.light], ['dark', S.dark], ['auto', S.auto]]} />} />
         <Row k={S.sLang} sub={S.sLangSub} extra={<Seg value={lang} onChange={setLang} options={[['zh', '中文'], ['en', 'English']]} />} />
-        <WritingStyle />
+        <WritingStyle grammar={grammar} setGrammar={setGrammar} />
         <Reminders />
         <Row k={S.sAuto} sub={S.sAutoSub}
           extra={<View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>{S.sources.map((l, i) => <Chip key={l} label={l} on={i < 3} />)}</View>} />
-        <Row k={S.sLocal} sub={S.sLocalSub}><Toggle on /></Row>
+        <Row k={S.sLocal} sub={S.sLocalSub}><Toggle on={false} /></Row>
         <Row k={S.sExport} sub={S.sExportSub}><Text style={{ color: t.mut, fontSize: 16 }}>→</Text></Row>
         <Meta style={{ marginTop: 24 }}>{S.colophon}</Meta>
       </ScrollView>
