@@ -134,10 +134,9 @@ function cluster(n: number, w: number): Rect[] {
    recording sit together beside its paragraph; drag any photo and the paragraphs reflow around it. */
 export function Page({ items, photos, title, meta, onDrag }: { items: Said[]; photos: Pic[]; title: string; meta: string; onDrag: (on: boolean) => void }) {
   const t = useT();
-  const S = useS();
   const face = useFace();
   const zh = useLang() === 'zh';
-  const W = Dimensions.get('window').width - 2 * SZ.px - 32;
+  const W = Dimensions.get('window').width - 2 * SZ.px;     // the page is today itself: no card, the full width
   const size = zh ? 14 : 15, lh = zh ? 22 : 20.5, gap = 7;
   const m = zh ? CN : SERIF;
 
@@ -154,7 +153,6 @@ export function Page({ items, photos, title, meta, onDrag }: { items: Said[]; ph
   /* where each photo starts: each set beside the start of its paragraph (or under the set before it),
      sets alternating right and left; a photo that has been dragged stays where it was put */
   const [moved, setMoved] = useState<Record<string, { x: number; y: number }>>({});
-  const [touched, setTouched] = useState(false);
   const [front, setFront] = useState('');           // the photo picked up last sits above the others
   const tiles: { key: string; pics: Pic[]; r: Rect }[] = [];
   let prevPara = -1, prevBottom = 0;
@@ -186,13 +184,12 @@ export function Page({ items, photos, title, meta, onDrag }: { items: Said[]; ph
     const w = placed.current[id]?.w ?? 0;
     setMoved((s) => ({ ...s, [id]: { x: Math.max(0, Math.min(W - w, origin.current.x + dx)), y: Math.max(0, origin.current.y + dy) } }));
   }, [W]);
-  /* the hint goes once the first photo is put down, not when it's picked up: a layout shift under the finger would end the drag */
-  const drop = useCallback(() => { onDrag(false); setTouched(true); }, [onDrag]);
+  const drop = useCallback(() => onDrag(false), [onDrag]);
 
   return (
-    <View style={[d.page, { backgroundColor: t.panel }]}>
+    <View style={d.page}>
       <Text style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text>
-      <Text style={[d.meta, { color: t.mut }]}>{meta}{tiles.length && !touched ? `  ·  ${S.dragHint}` : ''}</Text>
+      {meta ? <Text style={[d.meta, { color: t.mut }]}>{meta}</Text> : null}
       <View style={{ height, marginTop: 12 }}>
         {lines.map((l, i) => (
           <Text key={i} numberOfLines={1} style={{ position: 'absolute', left: l.x, top: l.y, fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body }}>{l.s}</Text>
@@ -211,7 +208,7 @@ export function Page({ items, photos, title, meta, onDrag }: { items: Said[]; ph
 const d = StyleSheet.create({
   tx: { fontSize: 16, lineHeight: 29 },
   txEn: { fontSize: 17.5, lineHeight: 27 },
-  page: { borderRadius: SZ.panelR - 6, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 14 },
+  page: { paddingTop: 6 },
   title: { fontSize: 20, lineHeight: 28 },
   titleEn: { fontSize: 23, lineHeight: 28, letterSpacing: -0.2 },
   meta: { fontSize: 11.5, marginTop: 3 },

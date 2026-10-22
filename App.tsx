@@ -62,6 +62,7 @@ export default function App() {
     if (e && !days[key]) {
       const said: Said[] = [{ kind: 'talk', text: e.s }, { kind: 'photos', parts: e.p.map((k, j) => ({ unit: { idx: [j] }, text: S.pline[k] ?? '' })) }];
       setDays((m) => ({ ...m, [key]: { photos: e.p.map((k) => ({ asset: PHOTO[k] })), groups: [], said, laid: said.length } }));
+      tipDrag({ photos: [], groups: [], said, laid: said.length }, said.length);
     }
     setCur(e?.today ? 'today' : key);
     setPane(null);
@@ -87,11 +88,21 @@ export default function App() {
     } catch { /* no camera, e.g. the simulator */ }
   }
 
+  /* the first page with photos tells the person, once, that photos can be dragged (until the tutorial is designed) */
+  function tipDrag(d: Day, laid: number) {
+    if (!d.said.slice(0, laid).some((x) => x.kind === 'photos' && x.parts.some((p) => p.unit.idx.length))) return;
+    AsyncStorage.getItem('qd-tip-drag').then((v) => {
+      if (v) return;
+      setNotice({ text: S.dragHint });
+      AsyncStorage.setItem('qd-tip-drag', '1').catch(() => {});
+    }).catch(() => {});
+  }
+
   /* laying out is a step the person chooses; it takes everything said so far */
   function layout() {
     const key = cur, n = day.said.length;
     setMaking(true);
-    setTimeout(() => { update(key, (d) => ({ ...d, laid: n })); setMaking(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }, 2000);
+    setTimeout(() => { update(key, (d) => ({ ...d, laid: n })); tipDrag(day, n); setMaking(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }, 2000);
   }
 
   /* the real microphone runs under the demo transcript */
@@ -119,7 +130,6 @@ export default function App() {
   const t = isDark ? darkT : lightT;
   const h = new Date().getHours();
   const entry = cur === 'today' ? null : S.entries[Number(cur.slice(1))];
-  const nLaid = S.nSaid(day.laid);
 
   return (
     <SafeAreaProvider>
@@ -132,7 +142,7 @@ export default function App() {
               <>
                 <Home key={cur} hidden={pane !== null} night={h >= 18 || h < 5}
                   past={!!entry} title={entry ? entry.when : S.navToday} onToday={() => setCur('today')}
-                  pageTitle={entry ? entry.t : S.todayTitle} pageMeta={entry ? nLaid : `${S.date}  ·  ${nLaid}`}
+                  pageTitle={entry ? entry.t : S.todayTitle} pageMeta={entry ? '' : S.date}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}
                   onRemove={(idx) => update(cur, (d) => removePhotos(d, idx))}
                   said={day.said} laid={day.laid} making={making} onCamera={shoot} onPick={pick} onOpen={setPane} onRecord={rec}
