@@ -1,0 +1,28 @@
+[
+  { "id": "zh-fillers", "lang": "zh", "in": "嗯，然后我今天就是，就是去了湖边那家咖啡馆，那个气氛真的是绝了。", "keep": ["湖边那家咖啡馆", "绝了"], "drop": ["嗯", "就是，就是"] },
+  { "id": "zh-stutter", "lang": "zh", "in": "我我我觉得这个这个方案其实还挺好的，就是有点贵。", "keep": ["其实还挺好的", "有点贵"], "drop": ["我我", "这个这个"] },
+  { "id": "zh-correction", "lang": "zh", "in": "我们周二，不对，周三去爬山，然后，呃，下午就下雨了。", "keep": ["周三去爬山", "下午就下雨了"], "drop": ["周二", "不对", "呃"] },
+  { "id": "zh-emphasis", "lang": "zh", "in": "那个蛋糕真的绝了绝了，嗯，我下次还要去。", "keep": ["绝了绝了", "我下次还要去"], "drop": ["嗯"] },
+  { "id": "zh-dialect", "lang": "zh", "in": "这事儿吧，其实也没啥，嗯，就是心里有点堵得慌。", "keep": ["这事儿吧", "没啥", "堵得慌"], "drop": ["嗯"] },
+  { "id": "zh-clean", "lang": "zh", "in": "晚上和妈妈视频了半个小时，她说桂花开了。", "keep": ["晚上和妈妈视频了半个小时", "她说桂花开了"], "drop": [], "clean": true },
+  { "id": "zh-false-start", "lang": "zh", "in": "我想说的是，我那个，我其实不太想换工作。", "keep": ["其实不太想换工作"], "drop": ["我那个"] },
+  { "id": "zh-names-numbers", "lang": "zh", "in": "嗯，三点半跟小林在，在国贸那边碰头，他迟到了二十分钟。", "keep": ["三点半", "小林", "国贸", "迟到了二十分钟"], "drop": ["嗯", "在，在"] },
+
+  { "id": "en-fillers", "lang": "en", "in": "Um, so today I, like, went to that café by the lake, and it was, uh, honestly so good.", "keep": ["went to that café by the lake", "honestly so good"], "drop": ["Um", "uh", ", like,"] },
+  { "id": "en-stutter", "lang": "en", "in": "I I I think the the meeting went fine, you know, better than I expected.", "keep": ["the meeting went fine", "better than I expected"], "drop": ["I I", "the the", "you know"] },
+  { "id": "en-correction", "lang": "en", "in": "We left at six, no wait, seven, and got there before the rain.", "keep": ["seven", "got there before the rain"], "drop": ["six", "no wait"] },
+  { "id": "en-hedges", "lang": "en", "in": "It was kind of a weird day, I guess, but kind of nice too.", "keep": ["kind of a weird day", "I guess", "kind of nice too"], "drop": [], "clean": true },
+  { "id": "en-emphasis", "lang": "en", "in": "The sunset was so so so pretty, um, I just stood there.", "keep": ["so so so pretty", "I just stood there"], "drop": ["um"] },
+  { "id": "en-clean", "lang": "en", "in": "Called Mom after dinner. She wants me home for the weekend.", "keep": ["Called Mom after dinner", "She wants me home for the weekend"], "drop": [], "clean": true },
+  { "id": "en-false-start", "lang": "en", "in": "I was gonna, I mean, I wanted to call her but I didn't.", "keep": ["I wanted to call her but I didn't"], "drop": ["I was gonna", "I mean"] },
+  { "id": "en-slang", "lang": "en", "in": "Ngl the vibes at that party were immaculate, uh, lowkey wanna go back.", "keep": ["Ngl", "vibes", "immaculate", "lowkey wanna go back"], "drop": ["uh"] },
+
+  { "id": "mix-cafe", "lang": "mix", "in": "今天去了那个 café，嗯，vibe 真的绝了，点了一个 flat white。", "keep": ["café", "vibe", "绝了", "flat white"], "drop": ["嗯", "氛围", "馥芮白"] },
+  { "id": "mix-meeting", "lang": "mix", "in": "下午那个 meeting，就是，就是一直在讨论 deadline，然后，呃，我觉得有点 burnout。", "keep": ["meeting", "deadline", "burnout"], "drop": ["呃", "就是，就是", "截止日期", "倦怠", "会议"] },
+  { "id": "mix-apply", "lang": "mix", "in": "我我我 honestly 不知道该不该 apply 那个 job，嗯，算了明天再想。", "keep": ["honestly", "apply", "job", "算了明天再想"], "drop": ["我我", "嗯", "申请"] },
+  { "id": "mix-clean", "lang": "mix", "in": "跟 Lin 吃了 hotpot，聊到快 12 点，他说他要 quit 了。", "keep": ["Lin", "hotpot", "12 点", "quit"], "drop": ["火锅", "辞职"], "clean": true },
+  { "id": "mix-correction", "lang": "mix", "in": "这周 workout 了三次，不对，四次，嗯，感觉 body 有点 sore。", "keep": ["workout", "四次", "sore"], "drop": ["三次", "不对", "嗯", "锻炼"] },
+  { "id": "mix-repeat", "lang": "mix", "in": "那个，那个 presentation 其实 went well，就是 Q&A 的时候有点 nervous。", "keep": ["presentation", "went well", "Q&A", "nervous"], "drop": ["那个，那个", "紧张"] },
+  { "id": "mix-like", "lang": "mix", "in": "Um 我觉得 like 这个 app 的 UI 还挺 clean 的。", "keep": ["我觉得", "app", "UI", "clean"], "drop": ["Um", "like"] },
+  { "id": "mix-long", "lang": "mix", "in": "嗯，今天早上起晚了，然后，然后就是匆匆忙忙去上班，地铁上 scroll 了一会儿 Xiaohongshu，看到一个 recipe，嗯，晚上回来就试着做了，结果，结果还挺成功的，就是盐放多了一点点。", "keep": ["起晚了", "scroll", "Xiaohongshu", "recipe", "还挺成功的", "盐放多了一点点"], "drop": ["嗯", "然后，然后", "结果，结果"] }
+]
