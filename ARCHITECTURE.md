@@ -28,6 +28,7 @@
 | ⑤ 修听错的词和语法 | 后端 | DeepSeek V4.1 Flash；语法关掉时用 V4 Flash | 一次调用，再用代码校验。不过就换 Claude Haiku 5.5 试一次，还不过就保留原文 | `fix.mjs` |
 | ⑥ 照片对号 | 手机 | 无（纯代码） | 句首或逗号后的编号：「一号」「照片一」「第一张」「三到六号」「picture one」「the second picture」「number one」 | `mobile/src/match.ts`、`match.mjs` |
 | ⑦ 排版 | 手机 | 无（纯代码） | 字宽表 + 逐行避让，文字绕开照片；拖动照片时每一帧重排 | `mobile/src/Doc.tsx` |
+| ⑨ 时间小标题 | 后端 `/sections` | DeepSeek V4 Flash（JSON 输出） | 排版时把一天的句子编号发一次，标出哪几句开始了新的时间段（上午、下午、after lunch），在那里加小标题，用说话人自己的词；代码检查标题必须出现在那句里。失败时用规则版。测试 8 段 × 2 遍：V4 Flash 16/16，V4.1 Flash 16/16，规则版 5/8 | `sections.mjs` |
 | ⑧ 版面导演（付费档） | 后端 `/layout` | Claude Haiku 5.5 | 一次结构化调用：标题（只能用原话里的词）、版式、金句（必须原文照抄）、主图；代码校验后交给 ⑦ | `director.mjs` |
 
 ②④ 是同一个节点（同一套提示词和校验），只是用在两个时间点。
