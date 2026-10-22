@@ -1,6 +1,6 @@
 /* What happened in a day: photos picked, groups made, and what was said. */
-/* file: the photo's path inside Documents, once it has been copied out of the picker's cache */
-export type Pic = { uri?: string; asset?: number; file?: string };
+/* file: the photo's path inside Documents, once it has been copied out of the picker's cache; r: its height over its width */
+export type Pic = { uri?: string; asset?: number; file?: string; r?: number };
 export type Unit = { idx: number[] };            // one photo, or a group of photos (indices into the picked list)
 /* spoken: the sentence as said ("one is the café…"); text: the same words without the number, used as the caption */
 export type Part = { unit: Unit; text: string; spoken?: string };
@@ -8,13 +8,21 @@ export type Part = { unit: Unit; text: string; spoken?: string };
    g: the words have had the grammar fix, or were edited by hand. A head is a time-of-day heading added at Lay out. */
 /* more: recordings joined into this paragraph from short ones after it */
 type Rec = { audio?: string; at?: number; secs?: number; g?: boolean; more?: { audio: string; at?: number; secs?: number }[] };
-export type Said = ({ kind: 'talk'; text: string } & Rec) | ({ kind: 'photos'; parts: Part[] } & Rec) | { kind: 'head'; text: string };
+/* paper: a photo of a page written by hand, with the words read from it (or none, when the person chose not to read it).
+   A head with a day starts that day on a page that runs over several days; it stays when the page is laid out again */
+export type Said = ({ kind: 'talk'; text: string } & Rec) | ({ kind: 'photos'; parts: Part[]; paper?: boolean } & Rec) | { kind: 'head'; text: string; day?: string };
 /* placed: photos dragged from the tray onto the page; moved: where a photo on the page was dragged to, by its key */
 export type Placed = { id: string; idx: number[] };
 /* p, k: the paragraph a photo belongs to and the line it starts on; y is only for positions saved before that;
    w: the width it was pinched to */
 export type Pos = { x: number; y: number; p?: number; k?: number; w?: number };
-export type Day = { photos: Pic[]; groups: number[][]; said: Said[]; laid: number; placed?: Placed[]; moved?: Record<string, Pos> };
+/* a sticker on the page: s is one from the set ('set:<name>') or one made from a photo ('file:<path inside Documents>');
+   it sits over the words (they don't move for it), y down from the top of paragraph p, x from the left; w its width,
+   r its tilt in degrees. p = -1: just put on the page at y from the top, not yet tied to a paragraph */
+export type Sticker = { id: string; s: string; p: number; x: number; y: number; w: number; r: number };
+/* span: a page written over several days (the key is r-<first day>) */
+export type Day = { photos: Pic[]; groups: number[][]; said: Said[]; laid: number; placed?: Placed[]; moved?: Record<string, Pos>;
+  stickers?: Sticker[]; span?: { from: string; to: string } };
 
 /* photos in order, with each group standing where its first photo was */
 export function unitsOf(count: number, groups: number[][]): Unit[] {

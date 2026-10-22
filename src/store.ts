@@ -6,7 +6,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths } from 'expo-file-system';
 import { PHOTO } from './images';
-import { Day, Pic, Placed, Pos, Said } from './session';
+import { Day, Pic, Placed, Pos, Said, Sticker } from './session';
 
 const PREFIX = 'lore-day:';
 const native = Platform.OS !== 'web';
@@ -17,6 +17,8 @@ export function dayKey(d = new Date()) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 export const isDayKey = (k: string) => /^\d{4}-\d{2}-\d{2}$/.test(k);
+/* a page that runs over several days, kept under its first day */
+export const isSpanKey = (k: string) => /^r-\d{4}-\d{2}-\d{2}$/.test(k);
 
 const base = () => Paths.document.uri.replace(/\/?$/, '/');
 const inside = (uri: string) => (native && uri.startsWith(base()) ? uri.slice(base().length) : null);
@@ -54,23 +56,24 @@ export async function keepRecording(uri: string): Promise<string> {
   }
 }
 
-type Stored = { photos?: { file?: string; seed?: string; uri?: string }[]; groups?: number[][]; said?: Said[]; laid?: number; placed?: Placed[]; moved?: Record<string, Pos> };
+type Stored = { photos?: { file?: string; seed?: string; uri?: string; r?: number }[]; groups?: number[][]; said?: Said[]; laid?: number; placed?: Placed[]; moved?: Record<string, Pos>; stickers?: Sticker[]; span?: Day['span'] };
 const seedOf = (asset: number) => Object.keys(PHOTO).find((k) => PHOTO[k] === asset);
 
 /* sample photos are saved by name, since the bundle's asset numbers change between updates */
 function pack(d: Day): string {
-  const photos = d.photos.map((p) => (p.file ? { file: p.file } : p.asset !== undefined ? { seed: seedOf(p.asset) } : { uri: p.uri }));
+  const photos = d.photos.map((p) => ({ ...(p.file ? { file: p.file } : p.asset !== undefined ? { seed: seedOf(p.asset) } : { uri: p.uri }), ...(p.r ? { r: p.r } : {}) }));
   const rel = (a: string) => inside(a) ?? a;
   const said = d.said.map((x) => (x.kind === 'head' ? x : { ...x, audio: x.audio && rel(x.audio), more: x.more?.map((r) => ({ ...r, audio: rel(r.audio) })) }));
-  return JSON.stringify({ photos, groups: d.groups, said, laid: d.laid, placed: d.placed, moved: d.moved });
+  return JSON.stringify({ photos, groups: d.groups, said, laid: d.laid, placed: d.placed, moved: d.moved, stickers: d.stickers, span: d.span });
 }
 function unpack(s: string): Day | null {
   try {
     const j: Stored = JSON.parse(s);
-    const photos: Pic[] = (j.photos ?? []).map((p) =>
-      p.file && native ? { file: p.file, uri: new File(Paths.document, p.file).uri }
-        : p.seed && PHOTO[p.seed] !== undefined ? { asset: PHOTO[p.seed] } : { uri: p.uri });
-    return { photos, groups: j.groups ?? [], said: j.said ?? [], laid: j.laid ?? 0, placed: j.placed, moved: j.moved };
+    const photos: Pic[] = (j.photos ?? []).map((p) => ({
+      ...(p.file && native ? { file: p.file, uri: new File(Paths.document, p.file).uri }
+        : p.seed && PHOTO[p.seed] !== undefined ? { asset: PHOTO[p.seed] } : { uri: p.uri }), ...(p.r ? { r: p.r } : {}),
+    }));
+    return { photos, groups: j.groups ?? [], said: j.said ?? [], laid: j.laid ?? 0, placed: j.placed, moved: j.moved, stickers: j.stickers, span: j.span };
   } catch {
     return null;
   }
@@ -89,3 +92,11 @@ export async function loadDays(): Promise<Record<string, Day>> {
 export const fileUri = (a: string) => (!native || /^[a-z]+:/.test(a) ? a : new File(Paths.document, a).uri);
 
 export const saveDay = (key: string, d: Day) => AsyncStorage.setItem(PREFIX + key, pack(d));
+
+/* the stickers the person made from photos, newest first, by their path inside Documents */
+export async function loadMine(): Promise<string[]> {
+  try { const v = await AsyncStorage.getItem('lore-stickers'); return v ? JSON.parse(v) : []; } catch { return []; }
+}
+export const saveMine = (list: string[]) => AsyncStorage.setItem('lore-stickers', JSON.stringify(list)).catch(() => {});
+/* a file made by native code (a full file:// address) kept by its path inside Documents */
+export const relative = (uri: string) => inside(uri) ?? uri;

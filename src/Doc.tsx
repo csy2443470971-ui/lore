@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, PanResponder, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { AudioPlayer, createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { hyphenateSync } from 'hyphen/en';
 import { CN, Metric, SERIF } from './metrics';
 import { Mosaic } from './Photos';
-import { Pic, Placed, Pos, Said } from './session';
+import { Pic, Placed, Pos, Said, Sticker } from './session';
+import { stickerSrc } from './stickers';
 import { fileUri } from './store';
 import { SZ } from './theme';
 import { useFace, useLang, useS, useT } from './ui';
@@ -34,6 +35,23 @@ export function Stream({ items, onEdit }: { items: Said[]; onEdit?: (i: number) 
       )))}
     </View>
   );
+}
+
+/* The page's paragraphs and photo tiles, keyed as the page keys them ('t<first item>' for a paragraph, the tile's own
+   key for a photo or group), for choosing what goes on a share image */
+export function pieces(items: Said[], photos: Pic[], placed?: Placed[]) {
+  const paras: { key: string; text: string }[] = [];
+  const tiles: { key: string; pics: Pic[] }[] = [];
+  items.forEach((x, i) => {
+    if (x.kind === 'head') return;
+    if (x.kind === 'talk') { if (x.text) paras.push({ key: `t${i}`, text: x.text }); return; }
+    x.parts.forEach((p, j) => { const pics = p.unit.idx.map((k) => photos[k]).filter(Boolean); if (pics.length) tiles.push({ key: `${i}-${j}`, pics }); });
+    let text = '';
+    for (const p of x.parts) { if (text && p.text && !CJK.test(text.slice(-1) + p.text[0])) text += ' '; text += p.text; }
+    if (text) paras.push({ key: `t${i}`, text });
+  });
+  for (const pl of placed ?? []) { const pics = pl.idx.map((k) => photos[k]).filter(Boolean); if (pics.length) tiles.push({ key: pl.id, pics }); }
+  return { paras, tiles };
 }
 
 /* ---------- flowing text: lines are broken in JS around the photos, one paragraph at a time ---------- */
@@ -222,6 +240,82 @@ function Movable({ id, r, z, grab, drag, pinch, drop, children }: {
   );
 }
 
+/* a sticker on the page: it sits over the words, as one does on paper, and the words don't move for it. One finger
+   moves it, two make it bigger or smaller and turn it; carried onto the bin at the bottom of the screen, it comes off.
+   While held it is drawn where the fingers have it (an offset, a scale and a turn over its place), so following them
+   re-renders nothing; let go, its new place is kept. One just put on lands with a small bounce. */
+type Spot2 = { x: number; y: number; w: number; r: number };
+function Stuck({ st, top, source, slap, still, bin, place, carry }: {
+  st: Sticker; top: number; source: number | { uri: string }; slap: boolean; still: boolean;
+  bin?: { x: number; y: number };                 // the bin's centre on the screen
+  place: (id: string, at: Spot2 | null) => void; carry?: (state: 'on' | 'over' | null) => void;
+}) {
+  const pan = useState(() => new Animated.ValueXY())[0];
+  const grow = useState(() => new Animated.Value(1))[0];
+  const turn = useState(() => new Animated.Value(0))[0];
+  const pop = useState(() => new Animated.Value(slap ? 1.7 : 1))[0];
+  const tilt = turn.interpolate({ inputRange: [-720, 720], outputRange: ['-720deg', '720deg'] });
+  useEffect(() => {
+    if (!slap) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    Animated.spring(pop, { toValue: 1, friction: 4.5, tension: 160, useNativeDriver: true }).start();
+  }, [slap, pop]);
+  const g = useRef({ st, top, carry, binAt: bin, dx: 0, dy: 0, s: 1, a: 0, d0: 0, s0: 1, a0: 0, ang0: 0, bin: false, shown: false });
+  useEffect(() => { g.current.st = st; g.current.top = top; g.current.carry = carry; g.current.binAt = bin; });
+  /* its new place has been drawn: the offset goes */
+  useLayoutEffect(() => { pan.setValue({ x: 0, y: 0 }); grow.setValue(1); turn.setValue(0); }, [st.x, st.y, st.w, st.r, top, pan, grow, turn]);
+  const pr = useMemo(() => {
+    const scr = Dimensions.get('window');
+    const inBin = (x: number, y: number) => { const b = g.current.binAt; return !!b && Math.hypot(x - b.x, y - b.y) < 56; };
+    /* the handlers only run during a gesture, never while rendering */
+    // eslint-disable-next-line react-hooks/refs
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => !still,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: () => {
+        Object.assign(g.current, { dx: 0, dy: 0, s: 1, a: 0, d0: 0, bin: false, shown: false });
+        Haptics.selectionAsync().catch(() => {});
+      },
+      onPanResponderMove: (ev, gs) => {
+        const c = g.current, tt = ev.nativeEvent.touches;
+        if (tt.length >= 2) {
+          const dist = Math.hypot(tt[0].pageX - tt[1].pageX, tt[0].pageY - tt[1].pageY) || 1;
+          const ang = Math.atan2(tt[1].pageY - tt[0].pageY, tt[1].pageX - tt[0].pageX) * 180 / Math.PI;
+          if (!c.d0) { c.d0 = dist; c.ang0 = ang; c.s0 = c.s; c.a0 = c.a; }
+          c.s = c.s0 * dist / c.d0; c.a = c.a0 + ang - c.ang0;
+          grow.setValue(c.s); turn.setValue(c.a);
+        } else if (!c.d0) {                         // once pinched, lifting one finger doesn't make it jump
+          c.dx = gs.dx; c.dy = gs.dy;
+          pan.setValue({ x: c.dx, y: c.dy });
+          /* the screen hears only when the bin should show, or the sticker comes over it or leaves it: nothing else re-renders */
+          const bin = inBin(gs.moveX, gs.moveY);
+          if (!c.shown || bin !== c.bin) {
+            c.shown = true; c.bin = bin;
+            if (bin) Haptics.selectionAsync().catch(() => {});
+            c.carry?.(bin ? 'over' : 'on');
+          }
+        }
+      },
+      onPanResponderRelease: () => {
+        const c = g.current, s0 = c.st;
+        if (c.shown) c.carry?.(null);
+        if (c.bin) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); place(s0.id, null); return; }
+        if (!c.dx && !c.dy && c.s === 1 && !c.a) return;
+        const w = Math.max(44, Math.min(scr.width * 0.8, s0.w * c.s));
+        const cx = s0.x + s0.w / 2 + c.dx, cy = c.top + s0.y + s0.w / 2 + c.dy;
+        place(s0.id, { x: Math.round(cx - w / 2), y: Math.round(cy - w / 2), w: Math.round(w), r: Math.round((s0.r + c.a) * 10) / 10 });
+      },
+      onPanResponderTerminate: () => { if (g.current.shown) g.current.carry?.(null); pan.setValue({ x: 0, y: 0 }); grow.setValue(1); turn.setValue(0); },
+    });
+  }, [still, place, pan, grow, turn]);
+  return (
+    <Animated.View {...pr.panHandlers} style={[{ position: 'absolute', left: st.x, top: top + st.y, width: st.w, height: st.w, zIndex: 4,
+      transform: [...pan.getTranslateTransform(), { rotate: `${st.r}deg` }, { rotate: tilt }, { scale: Animated.multiply(grow, pop) }] }, d.stickerShadow]}>
+      <Image source={source} contentFit="contain" style={{ width: st.w, height: st.w }} pointerEvents="none" />
+    </Animated.View>
+  );
+}
+
 /* how a set of photos sits together: one, a pair, one large with two small, or a 2×2 grid; w is the page width */
 const G = 4;
 function cluster(n: number, w: number): Rect[] {
@@ -244,7 +338,7 @@ export const solo = (w: number) => cluster(1, w)[0];
    English lines up at both edges like Chinese. Drag any photo and the paragraphs reflow around it; where it ends up
    is kept. A photo carried in from the tray (preview) moves the words before it is let go. Tap a word to edit it. */
 type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
-export function Page({ items, photos, placed, moved, preview, voice, indent, onTitle, title, meta, area, onDrag, onMove, onEdit, onHold }: {
+export function Page({ items, photos, placed, moved, preview, voice, indent, onTitle, title, meta, area, onDrag, onMove, onEdit, onHold, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag }: {
   items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; preview?: { pics: Pic[]; x: number; y: number } | null;
   voice?: boolean;                                                // voice bars at the top left of what was said (a setting)
   indent?: boolean;                                               // first-line indent (a setting)
@@ -252,7 +346,13 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   title: string; meta: string;
   area?: React.RefObject<View | null>;                           // the text area, for finding where a photo from the tray was dropped
   onDrag: (on: boolean) => void; onMove: (key: string, at: Pos) => void; onEdit: (item: number, part: number) => void;
-  onHold?: (item: number) => void;                               // a long press on a paragraph (after the first): offer to join it to the one above
+  onHold?: (item: number, first: boolean) => void;               // a long press on a paragraph: share it, or join it to the one above
+  chosen?: Set<string>;                                          // choosing what to share: these paragraphs ('t<item>') and photos are marked
+  onChoose?: (key: string) => void;                              // while choosing, a tap marks a paragraph or photo instead of editing it
+  stickers?: Sticker[]; slap?: string;                           // slap: the sticker just put on, which lands with a little bounce
+  onSticker?: (id: string, at: Partial<Sticker> | null) => void;  // a sticker moved, turned, resized, or (null) thrown away
+  bin?: { x: number; y: number };                                // where the bin for stickers shows on the screen
+  onStickerDrag?: (state: 'on' | 'over' | null) => void;         // a sticker is carried (and over the bin), or let go
 }) {
   const t = useT();
   const face = useFace();
@@ -265,7 +365,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   /* one paragraph per recording; a recording about photos brings its photos (a group counts as one tile) */
   const paras: string[] = [];
   const srcs: Src[][] = [];
-  const sets: { para: number; tiles: { key: string; pics: Pic[] }[] }[] = [];
+  const sets: { para: number; tiles: { key: string; pics: Pic[] }[]; paper?: 'read' | 'only' }[] = [];
   /* above a paragraph: the time heading before it, and a voice bar where a new stretch of talking starts. Recordings
      belong to one bar while each starts within 20 minutes of the last one ending; a longer break starts a new bar */
   const marks: { head?: string; bar?: Bar; time?: number }[] = [];
@@ -280,7 +380,8 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     }
     if (x.kind === 'talk') { if (x.text) para(x.text, [{ item: i, part: -1, from: 0 }], x.at); return; }
     const tiles = x.parts.map((p, j) => ({ key: `${i}-${j}`, pics: p.unit.idx.map((k) => photos[k]).filter(Boolean) })).filter((tl) => tl.pics.length);
-    for (let c = 0; c < tiles.length; c += 4) sets.push({ para: paras.length, tiles: tiles.slice(c, c + 4) });
+    const paper = x.paper ? (x.parts.some((p) => p.text) ? 'read' as const : 'only' as const) : undefined;
+    for (let c = 0; c < tiles.length; c += 4) sets.push({ para: paras.length, tiles: tiles.slice(c, c + 4), paper });
     let text = '';                                  // captions join with a space, except next to Chinese
     const from = [...x.parts.map((p, j) => {
       if (text && p.text && !CJK.test(text.slice(-1) + p.text[0])) text += ' ';
@@ -309,11 +410,14 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     st.tiles.forEach((tl, i) => { const at = pos[tl.key]; if (at) singles.push({ key: tl.key, pics: tl.pics, w: at.w ?? all[i].w, h: all[i].h * (at.w ?? all[i].w) / all[i].w, at }); });
     const stay = st.tiles.filter((tl) => !pos[tl.key]);
     if (!stay.length) return;
-    const shape = cluster(stay.length, W);
+    const ratio = Math.min(1.5, Math.max(0.6, st.tiles[0].pics[0]?.r ?? 1.33));
+    const pw = Math.round(W * (st.paper === 'only' ? 0.78 : 0.42));
+    const shape = st.paper && stay.length === 1 ? [{ x: 0, y: 0, w: pw, h: Math.round(pw * ratio) }] : cluster(stay.length, W);
     const cw = Math.max(...shape.map((r) => r.x + r.w)), ch = Math.max(...shape.map((r) => r.y + r.h));
     const k = below[st.para] ?? 0, rowsN = linesFor(ch);
     below[st.para] = k + rowsN;
-    blocks.push({ spot: { key: `set${n}`, x: n % 2 ? 0 : W - cw, w: cw, p: st.para, k, n: rowsN }, ch, tiles: stay.map((tl, i) => ({ ...tl, r: shape[i] })) });
+    const bx = st.paper === 'only' ? Math.round((W - cw) / 2) : n % 2 ? 0 : W - cw;
+    blocks.push({ spot: { key: `set${n}`, x: bx, w: cw, p: st.para, k, n: rowsN }, ch, tiles: stay.map((tl, i) => ({ ...tl, r: shape[i] })) });
   });
   const one = solo(W);
   for (const pl of placed ?? []) {
@@ -401,9 +505,35 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     onDrag(false);
   }, [onDrag]);
 
+  /* a sticker let go (or just put on): tied to the paragraph its top is in; null throws it away */
+  const stuck = useRef(onSticker);
+  useEffect(() => { stuck.current = onSticker; });
+  const tied = useRef({ tops, height });
+  useEffect(() => { tied.current = { tops, height }; });
+  const stick = useCallback((id: string, at: { x: number; y: number; w: number; r: number } | null) => {
+    if (!at) { stuck.current?.(id, null); return; }
+    const { tops: ts, height: hh } = tied.current;
+    const y = Math.max(-at.w / 2, Math.min(hh, at.y));
+    let p = 0;
+    ts.forEach((tp, i) => { if (tp <= y) p = i; });
+    stuck.current?.(id, { p: ts.length ? p : -1, x: at.x, y: y - (ts[p] ?? 0), w: at.w, r: at.r });
+  }, []);
+  /* one just put on the page is tied to a paragraph straight away */
+  const loose = (stickers ?? []).filter((st) => st.p < 0 && tops.length).map((st) => `${st.id}|${st.x}|${st.y}|${st.w}|${st.r}`).join(',');
+  useEffect(() => {
+    for (const one of loose ? loose.split(',') : []) {
+      const [id, x, y, w, r] = one.split('|');
+      stick(id, { x: +x, y: +y, w: +w, r: +r });
+    }
+  }, [loose, stick]);
+
   /* a tap edits the words under the finger: their recording, or the caption of the photo they belong to */
-  const edit = (p: number, o: number) => { const sr = srcs[p].reduce((r, c) => (c.from <= o ? c : r), srcs[p][0]); onEdit(sr.item, sr.part); };
-  const hold = (p: number) => (p > 0 && onHold ? () => onHold(srcs[p][0].item) : undefined);
+  const edit = (p: number, o: number) => {
+    if (onChoose) { onChoose(`t${srcs[p][0].item}`); return; }
+    const sr = srcs[p].reduce((r, c) => (c.from <= o ? c : r), srcs[p][0]); onEdit(sr.item, sr.part);
+  };
+  const hold = (p: number) => (onHold && !onChoose ? () => onHold(srcs[p][0].item, p === 0) : undefined);
+  const marked = (p: number) => !!chosen?.has(`t${srcs[p][0].item}`);
   const ink = { position: 'absolute' as const, fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body };
   /* justified: the room left on a line goes between its words (or characters); the last line of a paragraph, and a
      line where the gaps would grow wide, stay set to the left */
@@ -415,22 +545,28 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     const room = l.w - natural;
     const narrow = l.w < W * 0.6;                   // a column beside a photo: its edge faces the photo, so it stretches further
     const each = !l.last && cuts > 0 && room > 0 && room / cuts <= size * (chars ? 0.3 : narrow ? 1.5 : 0.6) ? room / cuts : 0;
+    const mark = marked(l.p) ? (
+      <View key={`h${li}`} pointerEvents="none" style={[d.marker, { left: l.x - 3, top: l.y + 2, width: (each || (chars && room > 0 && !l.last) ? l.w : natural) + 6, height: lh - 3, backgroundColor: t.glow }]} />
+    ) : null;
     if (chars) {
       /* letter spacing also follows the last character, so the room is shared by every character, less a little slack;
          a line whose closing punctuation hangs past the edge is drawn a hair tighter instead, so it is never cut off */
       const ls = each ? Math.max(0, (room - 2) / toks.length) : room < 0 ? (room - 1) / toks.length : 0;
       const step = (x: number) => Math.max(0, Math.min(toks.length - 1, Math.floor(x / ((natural / toks.length) + ls))));
       return (
-        <Text key={li} numberOfLines={1} ellipsizeMode="clip" onPress={(ev) => edit(l.p, toks[step(ev.nativeEvent.locationX)].o)} onLongPress={hold(l.p)}
-          style={[ink, { left: l.x, top: l.y, letterSpacing: ls }]}>{toks.map((tk) => tk.s).join('')}</Text>
+        <React.Fragment key={li}>
+          {mark}
+          <Text numberOfLines={1} ellipsizeMode="clip" onPress={(ev) => edit(l.p, toks[step(ev.nativeEvent.locationX)].o)} onLongPress={hold(l.p)}
+            style={[ink, { left: l.x, top: l.y, letterSpacing: ls }]}>{toks.map((tk) => tk.s).join('')}</Text>
+        </React.Fragment>
       );
     }
     let x = l.x;
-    return toks.map((tk, j) => {
+    return [mark, ...toks.map((tk, j) => {
       const at = x;
       x += tk.full + (j < toks.length - 1 && !NO_START.test(toks[j + 1].s) ? each : 0);
       return <Text key={`${li}-${j}`} numberOfLines={1} onPress={() => edit(l.p, tk.o)} onLongPress={hold(l.p)} style={[ink, { left: at, top: l.y }]}>{tk.s.trimEnd()}</Text>;
-    });
+    })];
   };
 
   return (
@@ -456,6 +592,25 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
               : <Image source={src(tl.pics[0])} contentFit="cover" style={{ width: tl.r.w, height: tl.r.h, borderRadius: 8 }} />}
           </Movable>
         ))}
+        {onChoose ? tiles.map((tl) => {
+          const on = !!chosen?.has(tl.key);
+          return (
+            <Pressable key={`c${tl.key}`} onPress={() => onChoose(tl.key)} style={[d.pick, { left: tl.r.x, top: tl.r.y, width: tl.r.w, height: tl.r.h, borderColor: on ? t.ink : 'transparent' }]}>
+              <View style={[d.check, { backgroundColor: on ? t.ink : 'rgba(255,255,255,0.85)', borderColor: on ? t.ink : t.mut }]}>
+                {on ? <Text style={[d.checkT, { color: t.b }]}>✓</Text> : null}
+              </View>
+            </Pressable>
+          );
+        }) : null}
+        {(stickers ?? []).map((st) => {
+          const source = stickerSrc(st.s);
+          if (!source) return null;
+          const p = Math.min(st.p, tops.length - 1);
+          return (
+            <Stuck key={st.id} st={st} top={st.p >= 0 && p >= 0 ? tops[p] : 0} source={source} slap={st.id === slap} still={!onSticker || !!onChoose}
+              bin={bin} place={stick} carry={onStickerDrag} />
+          );
+        })}
         {ghost && preview ? (
           <View pointerEvents="none" style={{ position: 'absolute', left: rects.preview.x, top: rects.preview.y, width: rects.preview.w, height: rects.preview.h, zIndex: 3, opacity: 0.9 }}>
             {preview.pics.length > 1 ? <Mosaic pics={preview.pics} w={rects.preview.w} h={rects.preview.h} r={8} />
@@ -511,6 +666,13 @@ function VoiceBar({ bar }: { bar: Bar }) {
 
 const d = StyleSheet.create({
   head: { position: 'absolute', left: 0, fontSize: 14.5, lineHeight: 20, fontWeight: '600' },
+  marker: { position: 'absolute', borderRadius: 3 },
+  /* a sticker's shadow follows its own outline: on the phone from the picture's edge, on the web as a drop-shadow filter */
+  stickerShadow: Platform.OS === 'web' ? ({ filter: 'drop-shadow(0 1.5px 2px rgba(0,0,0,0.18))' } as object)
+    : { shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2.5, shadowOffset: { width: 0, height: 1.5 } },
+  pick: { position: 'absolute', zIndex: 5, borderWidth: 2, borderRadius: 10 },
+  check: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  checkT: { fontSize: 12, fontWeight: '700', marginTop: -1 },
   stamp: { position: 'absolute', left: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
   time: { fontSize: 11.5, letterSpacing: 0.3, fontVariant: ['tabular-nums'] },
   bar: { flexDirection: 'row', alignItems: 'center', gap: 7, height: 22, paddingLeft: 3, paddingRight: 9, borderRadius: 11 },
