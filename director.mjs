@@ -15,7 +15,7 @@ export const Spec = z.object({
   photos: z.array(z.object({ photo: z.number().int(), size: z.enum(['small', 'medium', 'large']) })),
 });
 
-const SYSTEM = `You lay out one page of a personal journal. You receive the day's text, already in the writer's own words, and the day's photos with what was said about each.
+export const DIRECTOR_SYSTEM = `You lay out one page of a personal journal. You receive the day's text, already in the writer's own words, and the day's photos with what was said about each.
 
 Choose:
 - title: at most six words, made only of words the writer used. No new adjectives.
@@ -26,15 +26,13 @@ Choose:
 
 Never rewrite or add to the text.`;
 
-const client = new Anthropic();
-
-export async function direct(day, model = 'claude-haiku-5-5') {
+export async function direct(day, { client = new Anthropic(), model = 'claude-haiku-5-5' } = {}) {
   const body = [
     `Text:\n${day.text}`,
     `Photos:\n${day.photos.map((p, i) => `${i + 1}. ${p}`).join('\n')}`,
   ].join('\n\n');
   const res = await client.messages.parse({
-    model, max_tokens: 1000, system: SYSTEM,
+    model, max_tokens: 1000, system: DIRECTOR_SYSTEM,
     thinking: { type: 'disabled' },
     messages: [{ role: 'user', content: body }],
     output_config: { effort: 'low', format: zodOutputFormat(Spec) },
@@ -62,7 +60,7 @@ export function validate(spec, day) {
 }
 
 // node director.mjs   runs the sample day from the app
-if (fileURLToPath(import.meta.url) === process.argv[1]) {
+if (typeof process !== 'undefined' && process.argv?.[1] && String(import.meta.url).startsWith('file:') && fileURLToPath(import.meta.url) === process.argv[1]) {
   const day = {
     text: 'So today I went to that café by the lake, and it was honestly so good. Then I walked to the bridge right at sunset. The café by the lake, the window seat was free. An oat latte with a heart in the foam. Sunset at the bridge, the lake turned orange-pink. The osmanthus is out, the whole street smells of it. That bowl of noodles at lunch, great broth. Hotpot with Lin until nearly midnight.',
     photos: ['the café by the lake, the window seat was free', 'an oat latte with a heart in the foam', 'sunset at the bridge, the lake turned orange-pink', 'the osmanthus is out', 'that bowl of noodles at lunch', 'hotpot with Lin until nearly midnight'],

@@ -14,7 +14,7 @@
 
 | 节点 | 免费 | 付费 | 做法 | 文件 |
 |---|---|---|---|---|
-| ① 转写 | ✓ | ✓ | 待定，另一个会话在做中英混说转写的 bake-off（`stt-bakeoff/`） | — |
+| ① 转写 | ✓ | ✓ | OpenAI gpt-transcribe（带中英混说提示），在后端调用 | `worker/src/index.js` |
 | ② 修口吃 | ✓ | ✓ | 一次便宜模型调用 + 代码清扫 + 代码校验，失败重试一次，再失败退回规则版 | `clean.mjs` |
 | ③ 照片对号 | ✓ | ✓ | 纯代码：识别「一号是…」「三到六号…」「number one is…」「the sixth photo…」 | `match.mjs` |
 | ④ 排版 | ✓ | ✓ | 纯代码：App 里的文字绕图引擎（字宽表 + 逐行避让），不调 API | `mobile/src/Doc.tsx` |
@@ -52,6 +52,28 @@
 
 注意：测试段落都很短，表里的成本主要是提示词本身。按一段一分钟的录音（约 350 个 token 进、330 个 token 出）估算，DeepSeek V4 Flash 每段约 $0.0002。
 
+## 转写选型：实测结果
+
+用 Mac 自带的中文和英文语音把那 24 段读出来（合成语音比真人清楚，所以这是排序，不是定论），每个选项都跑完「转写 → 修口吃」整条链路。
+
+| 转写 | 原始错误率 | 英文词保留 | 最终文本通过（24 段，按宽松比对：café = cafe、7 = seven） | 两步合计每分钟 |
+|---|---|---|---|---|
+| **OpenAI gpt-transcribe** | **2.4%** | **97%** | **21** | **$0.0051** |
+| OpenAI gpt-4o-mini-transcribe | 4.7% | 95% | 19 | $0.0036 |
+| Together Whisper large-v3 | 6.4% | 95% | 19 | $0.0021 |
+
+gpt-transcribe 剩下的错误大多来自合成语音本身（中文语音把 Lin 读成「林」、把 café 读成 cave），真错的只有一处（recipe 听成 reply）。gpt-4o-mini 会丢英文词（vibe 听成「玩」）；Whisper 会输出繁体、听错字（这事儿 → 这是二，盐 → 延）。所以**上线用 gpt-transcribe**。没能测的：Soniox、ElevenLabs Scribe（没有账号）、Gemini 3.5 Flash-Lite 和 Gemini 3.5 Transcribe（这个账号的预付额度用完了）、Deepgram Nova-3（这个账号不能按量调用）。转写在后端调用，换服务不用改 App。手机自带的转写在 Expo Go 里用不了（需要原生模块），要等 TestFlight 版本。
+
+## 后端（已上线）
+
+Cloudflare Worker：`https://lore-agent.csy2443470971.workers.dev`，代码在 `worker/`。
+
+- `POST /transcribe`：表单字段 `audio`（m4a）→ `{ raw, text, via }`。先 gpt-transcribe，再修口吃：DeepSeek V4 Flash；结果没通过校验就换 Claude Haiku 5.5 再试一次；还不行就用规则版。
+- `POST /tidy`：`{ text }` → `{ text, via }`，只修口吃。
+- `POST /layout`：`{ text, photos }` → `{ spec }`，付费档的版面导演（Claude Haiku 5.5）。
+
+每个请求都要带 App 的 key（`x-lore-key`），同一个地址每分钟最多 20 次。四个 key（OpenAI、Together、Anthropic、App key）都是 Worker 的 secret，不在 App 里也不在仓库里；App 用到的地址和 App key 放在 `mobile/.env`（不进 git）和 EAS 的 preview 环境变量里。注意：App key 会被打包进 App，只能挡住随手的滥用，正式上线前要换成用户登录。
+
 ## 每位用户每月大概多少钱（估算）
 
 假设每天一篇、每篇 3 段一分钟录音、每月排版 30 次：
@@ -60,12 +82,12 @@
 |---|---|---|
 | ② 修口吃（90 段） | 约 $0.02 | 约 $0.02 |
 | ⑤ 版面导演（30 页，Claude Haiku 5.5，实测每页约 $0.0002） | — | 约 $0.01 |
-| ① 转写（90 分钟） | 取决于 bake-off 选的服务，大概是最大的一项 | 同左 |
+| ① 转写（90 分钟，gpt-transcribe $0.0045/分钟） | 约 $0.41 | 约 $0.41 |
 
 ## 还没做的
 
-- **接进 App**：API key 不能放进手机，需要一个很小的后端（例如 Cloudflare Worker）收转写文本、调 ②、返回结果。App 现在用的还是示例文字。
-- **转写**：等 bake-off 的结论。
+- **用户登录**：现在靠 App key 防滥用，正式上线前要换成每个用户自己的身份和用量上限。
+- **更便宜的转写**：Soniox（约 $0.0017/分钟）和 Gemini Flash-Lite（约 $0.0009/分钟）有账号或额度后再测，过关就换。
 - **用真实录音再测一轮**：现在的 24 段是构造的，需要换成真实的日记录音，尤其是长段落和中英混说。
 - **隐私**：DeepSeek 模型在 Together 的美国机房跑，Claude 在 Anthropic；上线前要写清楚文字会发到哪里、保留多久。
 
