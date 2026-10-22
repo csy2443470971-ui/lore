@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Animated, Dimensions, PanResponder, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
+import { hyphenateSync } from 'hyphen/en';
 import { CN, Metric, SERIF } from './metrics';
 import { Mosaic } from './Photos';
 import { Pic, Placed, Pos, Said } from './session';
@@ -33,9 +34,14 @@ export function Stream({ items, onEdit }: { items: Said[]; onEdit?: (i: number) 
   );
 }
 
-/* ---------- flowing text: lines are broken in JS around the photos' rectangles ---------- */
+/* ---------- flowing text: lines are broken in JS around the photos, one paragraph at a time ---------- */
 type Rect = { x: number; y: number; w: number; h: number };
-type Line = { x: number; y: number; s: string; p: number; o: number };   // p: paragraph, o: where in it the line starts
+type Tok = { s: string; o: number };              // a word or a Chinese character, and where it starts in its paragraph
+type Line = { x: number; y: number; w: number; p: number; toks: Tok[]; last: boolean };   // w: the width of the gap it fills
+/* where a photo, or a set of photos, sits: beside paragraph p, from its line k down, n lines tall */
+type Spot = { key: string; x: number; w: number; p: number; k: number; n: number };
+
+const PAD = 9;                                    // the space between a photo and the words, the same on every side
 
 const adv = (m: Metric, size: number, s: string) => {
   let w = 0;
@@ -43,62 +49,104 @@ const adv = (m: Metric, size: number, s: string) => {
   return w;
 };
 /* Chinese breaks between any two characters, other scripts between words */
-const tokens = (s: string) => s.match(/[⺀-鿿豈-﫿　-〿＀-￯]|[^\s⺀-鿿豈-﫿　-〿＀-￯]+\s*|\s+/g) ?? [];
-const CJK = /[\u3400-\u9fff]/;
+const tokens = (s: string) => s.match(/[⺀-鿿豈-﫿　-〿＀-￯]|[^\s⺀-鿿豈-﫿　-〿＀-￯]+\s*|\s+/g) ?? [];
+const CJK = /[㐀-鿿]/;
 const NO_START = /^[，。、！？；：）」』”’》,.!?;:)\]]/;
 
-function flow(paras: string[], rects: Rect[], width: number, m: Metric, size: number, lh: number, gap: number) {
-  const pad = 7, minSeg = size * 2.5;            // the gap kept around a photo, and the narrowest gap worth filling
-  const lines: Line[] = [];
-  const starts: number[] = [];
+/* where an English word may break with a hyphen (TeX's patterns), keeping at least three letters on each side */
+const breaks = new Map<string, number[]>();
+function cuts(word: string): number[] {
+  if (!breaks.has(word)) {
+    const parts = hyphenateSync(word, { hyphenChar: '|' }).split('|');
+    const at: number[] = [];
+    let c = 0;
+    for (const p of parts.slice(0, -1)) { c += p.length; if (c >= 3 && word.length - c >= 3) at.push(c); }
+    breaks.set(word, at);
+  }
+  return breaks.get(word)!;
+}
+
+/* A photo belongs to one paragraph and covers whole lines, so it never runs into the next paragraph (which starts
+   below it) and its edges sit PAD from the ink of the lines above and below, as they do from the words beside it. */
+function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number) {
+  const e = PAD - (lh - size) / 2;                // how far a photo's edge sits inside its first and last line
+  const minSeg = size * 4;                        // a gap beside a photo narrower than this stays empty
+  const lines: Line[] = [], starts: number[] = [], rows: number[] = [];
+  const rects: Record<string, Rect> = {};
   let y = 0;
-  const free = (y0: number, y1: number) => {
-    let segs: [number, number][] = [[0, width]];
-    for (const r of rects) {
-      if (r.y - pad >= y1 || r.y + r.h + pad <= y0) continue;
-      const a = r.x - pad, b = r.x + r.w + pad;
-      segs = segs.flatMap(([s, e]) => (b <= s || a >= e ? [[s, e]] : [[s, Math.max(s, a)], [Math.min(e, b), e]] as [number, number][]));
-    }
-    return segs.filter(([s, e]) => e - s >= minSeg);
-  };
-  paras.forEach((p, pi) => {
-    const tk = tokens(p);
+  paras.forEach((para, pi) => {
+    const start = y;
+    starts.push(start);
+    const own = spots.filter((sp) => sp.p === pi).map((sp) => ({ sp, y0: start + sp.k * lh, y1: start + (sp.k + sp.n) * lh }));
+    for (const { sp, y0 } of own) rects[sp.key] = { x: sp.x, y: y0 + e, w: sp.w, h: sp.n * lh - 2 * e };
+    const free = (ly: number) => {
+      let segs: [number, number][] = [[0, width]];
+      for (const { sp, y0, y1 } of own) {
+        if (y1 <= ly || y0 >= ly + lh) continue;
+        const a = sp.x - PAD, b = sp.x + sp.w + PAD;
+        segs = segs.flatMap(([s, f]) => (b <= s || a >= f ? [[s, f]] : [[s, Math.max(s, a)], [Math.min(f, b), f]] as [number, number][]));
+      }
+      return segs.filter(([s, f]) => f - s >= minSeg);
+    };
+    const tk = tokens(para);
     const at: number[] = [];
     let c = 0;
     for (const t of tk) { at.push(c); c += t.length; }
-    let i = 0;
-    starts.push(y);
-    while (i < tk.length) {
-      for (const [s, e] of free(y, y + lh)) {
+    let i = 0, ly = start;
+    const first = lines.length;
+    while (i < tk.length && ly < start + 5000 * lh) {
+      for (const [s, f] of free(ly)) {
         while (i < tk.length && /^\s+$/.test(tk[i])) i++;
         if (i >= tk.length) break;
         let acc = 0;
         const from = i;
         while (i < tk.length) {
           const w = adv(m, size, tk[i].trimEnd());
-          const hang = NO_START.test(tk[i]) && acc + w <= e - s + size;    // let closing punctuation hang rather than start a line
-          if (acc + w > e - s && !hang && i > from) break;
-          if (acc + w > e - s && i === from && e - s < width - 1) break;   // a word too long for a narrow gap: try the next gap
+          const hang = NO_START.test(tk[i]) && acc + w <= f - s + size;   // let closing punctuation hang rather than start a line
+          if (acc + w > f - s && !hang && i > from) {
+            /* the line would be left loose: break the next English word with a hyphen if a piece of it fits */
+            const word = tk[i].match(/^[A-Za-z]+/)?.[0] ?? '';
+            if (f - s - acc > size * 1.2 && word.length >= 6) {
+              const c2 = cuts(word).filter((c) => acc + adv(m, size, word.slice(0, c) + '-') <= f - s).pop();
+              if (c2) { tk.splice(i, 1, word.slice(0, c2) + '-', tk[i].slice(c2)); at.splice(i, 1, at[i], at[i] + c2); i++; }
+            }
+            break;
+          }
+          if (acc + w > f - s && i === from && f - s < width - 1) break;  // a word too long for a narrow gap: try the next gap
           acc += adv(m, size, tk[i]); i++;
         }
-        if (i > from) lines.push({ x: s, y, s: tk.slice(from, i).join('').trimEnd(), p: pi, o: at[from] });
+        if (i > from) lines.push({ x: s, y: ly, w: f - s, p: pi, toks: tk.slice(from, i).map((t, j) => ({ s: t, o: at[from + j] })), last: false });
       }
-      y += lh;
+      ly += lh;
     }
-    y += gap;
+    if (lines.length > first) lines[lines.length - 1].last = true;
+    rows.push(Math.round((ly - start) / lh));
+    y = Math.max(ly, ...own.map((o) => o.y1)) + gap;
   });
-  const bottom = Math.max(y - gap, ...rects.map((r) => r.y + r.h));
-  return { lines, starts, height: bottom };
+  return { lines, starts, rows, rects, height: Math.max(0, y - gap) };
 }
 
-/* one photo (or group) on the page that can be dragged anywhere; the words get out of its way.
-   The responder is made once, so a drag isn't reset as the position updates under the finger. */
-function Movable({ id, r, z, grab, drag, drop, children }: {
-  id: string; r: Rect; z: number; grab: (id: string) => void; drag: (id: string, dx: number, dy: number) => void; drop: () => void; children: React.ReactNode;
+/* a photo let go with its top-left at (x, y): the paragraph its top falls in, the nearest line, and the whole number
+   of lines its height rounds to; near an edge it moves to the edge */
+function toSpot(key: string, x: number, y: number, w: number, h: number, base: { starts: number[]; rows: number[] }, W: number, lh: number, size: number): Spot {
+  const e = PAD - (lh - size) / 2;
+  let p = 0;
+  base.starts.forEach((st, i) => { if (st <= y + lh / 2) p = i; });
+  const k = Math.max(0, Math.min(Math.max(0, (base.rows[p] ?? 1) - 1), Math.round((y - e - (base.starts[p] ?? 0)) / lh)));
+  const sx = x < 24 ? 0 : x > W - w - 24 ? W - w : x;
+  return { key, x: Math.max(0, Math.min(W - w, sx)), w, p, k, n: Math.max(2, Math.round((h + 2 * e) / lh)) };
+}
+
+/* one photo (or group) on the page that can be dragged anywhere with one finger, and made bigger or smaller with two;
+   the words get out of its way. The responder is made once, so a drag isn't reset as the position updates under the finger. */
+function Movable({ id, r, z, grab, drag, pinch, drop, children }: {
+  id: string; r: Rect; z: number; grab: (id: string) => void; drag: (id: string, dx: number, dy: number) => void;
+  pinch: (id: string, scale: number) => void; drop: () => void; children: React.ReactNode;
 }) {
   const lift = useState(() => new Animated.Value(1))[0];
   const pr = useMemo(() => {
-    const settle = () => { drop(); Animated.spring(lift, { toValue: 1, useNativeDriver: true, friction: 6 }).start(); };
+    const two = { spread: 0 };                     // the distance between two fingers when the second one came down
+    const settle = () => { two.spread = 0; drop(); Animated.spring(lift, { toValue: 1, useNativeDriver: true, friction: 6 }).start(); };
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderTerminationRequest: () => false,
@@ -107,11 +155,18 @@ function Movable({ id, r, z, grab, drag, drop, children }: {
         Haptics.selectionAsync().catch(() => {});
         Animated.spring(lift, { toValue: 1.04, useNativeDriver: true, friction: 6 }).start();
       },
-      onPanResponderMove: (_, g) => drag(id, g.dx, g.dy),
+      onPanResponderMove: (ev, g) => {
+        const tt = ev.nativeEvent.touches;
+        if (tt.length >= 2) {
+          const dist = Math.hypot(tt[0].pageX - tt[1].pageX, tt[0].pageY - tt[1].pageY);
+          if (!two.spread) two.spread = dist || 1;
+          pinch(id, dist / two.spread);
+        } else if (!two.spread) drag(id, g.dx, g.dy);   // once pinched, lifting one finger doesn't make the photo jump
+      },
       onPanResponderRelease: settle,
       onPanResponderTerminate: settle,
     });
-  }, [id, grab, drag, drop, lift]);
+  }, [id, grab, drag, pinch, drop, lift]);
   return (
     <Animated.View {...pr.panHandlers} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, zIndex: z, transform: [{ scale: lift }] }}>
       {/* the photo itself takes no touches: on the web an <img> would start the browser's own image drag and end ours */}
@@ -137,12 +192,14 @@ function cluster(n: number, w: number): Rect[] {
 /* a photo dragged onto the page from the tray is the size of a single photo */
 export const solo = (w: number) => cluster(1, w)[0];
 
-/* After Lay out: the words and photos set as a page, dense like a printed page. The photos from one
-   recording sit together beside its paragraph; photos dragged in from the tray sit where they were dropped.
-   Drag any photo and the paragraphs reflow around it; where it ends up is kept. Tap a line to edit it. */
+/* After Lay out: the words and photos set as a page, dense like a printed page. The photos from one recording sit
+   together beside its paragraph; photos dragged in from the tray sit where they were dropped. Lines are justified, so
+   English lines up at both edges like Chinese. Drag any photo and the paragraphs reflow around it; where it ends up
+   is kept. A photo carried in from the tray (preview) moves the words before it is let go. Tap a word to edit it. */
 type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
-export function Page({ items, photos, placed, moved, title, meta, area, onDrag, onMove, onEdit }: {
-  items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; title: string; meta: string;
+export function Page({ items, photos, placed, moved, preview, title, meta, area, onDrag, onMove, onEdit }: {
+  items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; preview?: { pics: Pic[]; x: number; y: number } | null;
+  title: string; meta: string;
   area?: React.RefObject<View | null>;                           // the text area, for finding where a photo from the tray was dropped
   onDrag: (on: boolean) => void; onMove: (key: string, at: Pos) => void; onEdit: (item: number, part: number) => void;
 }) {
@@ -150,8 +207,9 @@ export function Page({ items, photos, placed, moved, title, meta, area, onDrag, 
   const face = useFace();
   const zh = useLang() === 'zh';
   const W = Dimensions.get('window').width - 2 * SZ.px;     // the page is today itself: no card, the full width
-  const size = zh ? 14 : 15, lh = zh ? 22 : 20.5, gap = 12;
+  const size = zh ? 14 : 15, lh = zh ? 21 : 19.5, gap = 13;
   const m = zh ? CN : SERIF;
+  const run = (spots: Spot[]) => flow(paras, spots, W, m, size, lh, gap);
 
   /* one paragraph per recording; a recording about photos brings its photos (a group counts as one tile) */
   const paras: string[] = [];
@@ -170,78 +228,144 @@ export function Page({ items, photos, placed, moved, title, meta, area, onDrag, 
     }));
     paras.push(text);
   });
-  /* a tap on a line edits the words under the finger: their recording, or the caption of the photo they belong to */
-  const tapAt = (l: Line, x: number) => {
-    let o = l.o, w = 0;
-    for (const ch of l.s) { const a = adv(m, size, ch); if (w + a / 2 > x) break; w += a; o += ch.length; }
-    const sr = srcs[l.p].reduce((r, c) => (c.from <= o ? c : r), srcs[l.p][0]);
-    onEdit(sr.item, sr.part);
-  };
+  const e = PAD - (lh - size) / 2;
+  const linesFor = (h: number) => Math.max(2, Math.round((h + 2 * e) / lh));
 
-  /* where each photo is: where it was dragged to, or else each set beside the start of its paragraph (or under
-     the set before it), sets alternating right and left */
+  /* each set that hasn't been taken apart is one block beside the start of its paragraph (the next set of the same
+     paragraph below it), sets alternating right and left; its tiles are stretched to the block's whole lines */
   const [live, setLive] = useState<Record<string, Pos>>({});      // positions changed since this page was opened
-  const pos = { ...moved, ...live };
+  const pos: Record<string, Pos> = { ...moved, ...live };
   const [front, setFront] = useState('');           // the photo picked up last sits above the others
-  const tiles: { key: string; pics: Pic[]; r: Rect }[] = [];
+  const blocks: { spot: Spot; ch: number; tiles: { key: string; pics: Pic[]; r: Rect }[] }[] = [];
+  const singles: { key: string; pics: Pic[]; w: number; h: number; at: Pos }[] = [];
+  const below: Record<number, number> = {};
+  sets.forEach((st, n) => {
+    const all = cluster(st.tiles.length, W);
+    st.tiles.forEach((tl, i) => { const at = pos[tl.key]; if (at) singles.push({ key: tl.key, pics: tl.pics, w: at.w ?? all[i].w, h: all[i].h * (at.w ?? all[i].w) / all[i].w, at }); });
+    const stay = st.tiles.filter((tl) => !pos[tl.key]);
+    if (!stay.length) return;
+    const shape = cluster(stay.length, W);
+    const cw = Math.max(...shape.map((r) => r.x + r.w)), ch = Math.max(...shape.map((r) => r.y + r.h));
+    const k = below[st.para] ?? 0, rowsN = linesFor(ch);
+    below[st.para] = k + rowsN;
+    blocks.push({ spot: { key: `set${n}`, x: n % 2 ? 0 : W - cw, w: cw, p: st.para, k, n: rowsN }, ch, tiles: stay.map((tl, i) => ({ ...tl, r: shape[i] })) });
+  });
+  const one = solo(W);
   for (const pl of placed ?? []) {
     const pics = pl.idx.map((k) => photos[k]).filter(Boolean);
-    if (pics.length) tiles.push({ key: pl.id, pics, r: { ...solo(W), ...(pos[pl.id] ?? { x: 0, y: 0 }) } });
+    const at = pos[pl.id] ?? { x: 0, y: 0 };
+    if (pics.length) singles.push({ key: pl.id, pics, w: at.w ?? one.w, h: one.h * (at.w ?? one.w) / one.w, at });
   }
-  let prevPara = -1, prevBottom = 0;
-  sets.forEach((st, n) => {
-    const shape = cluster(st.tiles.length, W);
-    const cw = Math.max(...shape.map((r) => r.x + r.w)), ch = Math.max(...shape.map((r) => r.y + r.h));
-    const placedRects = tiles.map((tl) => tl.r);
-    const at = flow(paras, placedRects, W, m, size, lh, gap).starts[st.para] ?? 0;
-    const y0 = st.para === prevPara ? prevBottom + G * 2 : at + 3;
-    const x0 = n % 2 ? 0 : W - cw;
-    st.tiles.forEach((tl, i) => {
-      const at2 = pos[tl.key];
-      tiles.push({ key: tl.key, pics: tl.pics, r: at2 ? { ...shape[i], x: at2.x, y: at2.y } : { ...shape[i], x: x0 + shape[i].x, y: y0 + shape[i].y } });
-    });
-    prevPara = st.para; prevBottom = y0 + ch;
-  });
-  const { lines, height } = flow(paras, tiles.map((tl) => tl.r), W, m, size, lh, gap);
+  /* photos placed by hand: where they were put, in paragraph and line; one saved as a plain position (an older
+     version, or just dropped from the tray) is placed against the page without the hand-placed photos */
+  const base = run(blocks.map((b) => b.spot));
+  const lastP = Math.max(0, paras.length - 1);
+  const fresh: [string, Pos][] = [];
+  const spots = [...blocks.map((b) => b.spot), ...singles.map((sg) => {
+    if (sg.at.p !== undefined && sg.at.k !== undefined) return { key: sg.key, x: Math.min(sg.at.x, W - sg.w), w: sg.w, p: Math.min(sg.at.p, lastP), k: sg.at.k, n: linesFor(sg.h) };
+    const sp = toSpot(sg.key, sg.at.x, sg.at.y, sg.w, sg.h, base, W, lh, size);
+    fresh.push([sg.key, { ...sg.at, x: sp.x, p: sp.p, k: sp.k }]);
+    return sp;
+  })];
+  const ghost = preview ? toSpot('preview', preview.x, preview.y, one.w, one.h, base, W, lh, size) : null;
+  const { lines, rects, height } = run(ghost ? [...spots, ghost] : spots);
+  const tiles: { key: string; pics: Pic[]; r: Rect }[] = [];
+  for (const b of blocks) {
+    const r = rects[b.spot.key], sy = r.h / b.ch;
+    for (const tl of b.tiles) tiles.push({ key: tl.key, pics: tl.pics, r: { x: r.x + tl.r.x, y: r.y + tl.r.y * sy, w: tl.r.w, h: tl.r.h * sy } });
+  }
+  for (const sg of singles) tiles.push({ key: sg.key, pics: sg.pics, r: rects[sg.key] });
 
   /* where each photo was when the finger went down; read only inside the gesture handlers */
-  const rects = useRef<Record<string, Rect>>({});
+  const now = useRef({ rects: {} as Record<string, Rect>, base, sizes: {} as Record<string, { w: number; h: number }> });
   const origin = useRef({ x: 0, y: 0 });
   const last = useRef<{ id: string; at: Pos } | null>(null);
   const moveTo = useRef(onMove);
-  useEffect(() => { rects.current = Object.fromEntries(tiles.map((tl) => [tl.key, tl.r])); moveTo.current = onMove; });
+  useEffect(() => {
+    now.current = {
+      rects: Object.fromEntries(tiles.map((tl) => [tl.key, tl.r])), base,
+      sizes: Object.fromEntries([...singles.map((sg) => [sg.key, { w: sg.w, h: sg.h }]), ...blocks.flatMap((b) => b.tiles.map((tl) => [tl.key, { w: tl.r.w, h: tl.r.h }]))]),
+    };
+    moveTo.current = onMove;
+  });
+  /* positions read from an older version are saved once in paragraph and line */
+  const freshKey = JSON.stringify(fresh);
+  useEffect(() => { for (const [k, at] of JSON.parse(freshKey) as [string, Pos][]) moveTo.current(k, at); }, [freshKey]);
   const grab = useCallback((id: string) => {
-    const r = rects.current[id]; if (r) origin.current = { x: r.x, y: r.y };
+    const r = now.current.rects[id]; if (r) origin.current = { x: r.x, y: r.y };
     setFront(id); onDrag(true);
   }, [onDrag]);
   const drag = useCallback((id: string, dx: number, dy: number) => {
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
-    const w = rects.current[id]?.w ?? 0;
-    const at = { x: Math.max(0, Math.min(W - w, origin.current.x + dx)), y: Math.max(0, origin.current.y + dy) };
+    const sz = now.current.sizes[id] ?? { w: 0, h: 0 };
+    const y = Math.max(0, origin.current.y + dy);
+    const sp = toSpot(id, origin.current.x + dx, y, sz.w, sz.h, now.current.base, W, lh, size);
+    const at = { x: sp.x, y, p: sp.p, k: sp.k, w: sz.w };
     last.current = { id, at };
     setLive((s) => ({ ...s, [id]: at }));
-  }, [W]);
+  }, [W, lh, size]);
+  /* two fingers: the photo grows or shrinks from its top-left corner, between a quarter of the page and all of it */
+  const pinch = useCallback((id: string, scale: number) => {
+    const sz = now.current.sizes[id] ?? { w: 0, h: 0 };
+    if (!sz.w || !Number.isFinite(scale)) return;
+    const w = Math.round(Math.max(W * 0.25, Math.min(W, sz.w * scale))), h = sz.h * w / sz.w;
+    const sp = toSpot(id, Math.min(origin.current.x, W - w), origin.current.y, w, h, now.current.base, W, lh, size);
+    const at = { x: sp.x, y: origin.current.y, p: sp.p, k: sp.k, w };
+    last.current = { id, at };
+    setLive((s) => ({ ...s, [id]: at }));
+  }, [W, lh, size]);
   const drop = useCallback(() => {
     if (last.current) moveTo.current(last.current.id, last.current.at);
     last.current = null;
     onDrag(false);
   }, [onDrag]);
 
+  /* a tap edits the words under the finger: their recording, or the caption of the photo they belong to */
+  const edit = (p: number, o: number) => { const sr = srcs[p].reduce((r, c) => (c.from <= o ? c : r), srcs[p][0]); onEdit(sr.item, sr.part); };
+  const ink = { position: 'absolute' as const, fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body };
+  /* justified: the room left on a line goes between its words (or characters); the last line of a paragraph, and a
+     line where the gaps would grow wide, stay set to the left */
+  const setLine = (l: Line, li: number) => {
+    const toks = l.toks.map((tk) => ({ ...tk, w: adv(m, size, tk.s.trimEnd()), full: adv(m, size, tk.s) }));
+    const natural = toks.reduce((a, tk, j) => a + (j === toks.length - 1 ? tk.w : tk.full), 0);
+    const cuts = toks.slice(1).filter((tk) => !NO_START.test(tk.s)).length;
+    const chars = toks.every((tk) => tk.s.length === 1);
+    const room = l.w - natural;
+    const narrow = l.w < W * 0.6;                   // a column beside a photo: its edge faces the photo, so it stretches further
+    const each = !l.last && cuts > 0 && room > 0 && room / cuts <= size * (chars ? 0.3 : narrow ? 1.5 : 0.6) ? room / cuts : 0;
+    if (chars) {
+      const step = (x: number) => Math.max(0, Math.min(toks.length - 1, Math.floor(x / ((natural / toks.length) + each))));
+      return (
+        <Text key={li} numberOfLines={1} onPress={(ev) => edit(l.p, toks[step(ev.nativeEvent.locationX)].o)}
+          style={[ink, { left: l.x, top: l.y, letterSpacing: each }]}>{toks.map((tk) => tk.s).join('')}</Text>
+      );
+    }
+    let x = l.x;
+    return toks.map((tk, j) => {
+      const at = x;
+      x += tk.full + (j < toks.length - 1 && !NO_START.test(toks[j + 1].s) ? each : 0);
+      return <Text key={`${li}-${j}`} numberOfLines={1} onPress={() => edit(l.p, tk.o)} style={[ink, { left: at, top: l.y }]}>{tk.s.trimEnd()}</Text>;
+    });
+  };
+
   return (
     <View style={d.page}>
       <Text style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text>
       {meta ? <Text style={[d.meta, { color: t.mut }]}>{meta}</Text> : null}
       <View ref={area} collapsable={false} style={{ height, marginTop: 12 }}>
-        {lines.map((l, i) => (
-          <Text key={i} numberOfLines={1} onPress={(e) => tapAt(l, e.nativeEvent.locationX)}
-            style={{ position: 'absolute', left: l.x, top: l.y, fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body }}>{l.s}</Text>
-        ))}
+        {lines.map(setLine)}
         {tiles.map((tl) => (
-          <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} grab={grab} drag={drag} drop={drop}>
+          <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} grab={grab} drag={drag} pinch={pinch} drop={drop}>
             {tl.pics.length > 1 ? <Mosaic pics={tl.pics} w={tl.r.w} h={tl.r.h} r={8} />
               : <Image source={src(tl.pics[0])} contentFit="cover" style={{ width: tl.r.w, height: tl.r.h, borderRadius: 8 }} />}
           </Movable>
         ))}
+        {ghost && preview ? (
+          <View pointerEvents="none" style={{ position: 'absolute', left: rects.preview.x, top: rects.preview.y, width: rects.preview.w, height: rects.preview.h, zIndex: 3, opacity: 0.9 }}>
+            {preview.pics.length > 1 ? <Mosaic pics={preview.pics} w={rects.preview.w} h={rects.preview.h} r={8} />
+              : <Image source={src(preview.pics[0])} contentFit="cover" style={{ width: rects.preview.w, height: rects.preview.h, borderRadius: 8 }} />}
+          </View>
+        ) : null}
       </View>
     </View>
   );

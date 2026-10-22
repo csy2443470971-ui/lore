@@ -8,7 +8,9 @@ export type Part = { unit: Unit; text: string; spoken?: string };
 export type Said = { kind: 'talk'; text: string; audio?: string; g?: boolean } | { kind: 'photos'; parts: Part[]; audio?: string; g?: boolean };
 /* placed: photos dragged from the tray onto the page; moved: where a photo on the page was dragged to, by its key */
 export type Placed = { id: string; idx: number[] };
-export type Pos = { x: number; y: number };
+/* p, k: the paragraph a photo belongs to and the line it starts on; y is only for positions saved before that;
+   w: the width it was pinched to */
+export type Pos = { x: number; y: number; p?: number; k?: number; w?: number };
 export type Day = { photos: Pic[]; groups: number[][]; said: Said[]; laid: number; placed?: Placed[]; moved?: Record<string, Pos> };
 
 /* photos in order, with each group standing where its first photo was */
