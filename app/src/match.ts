@@ -66,7 +66,7 @@ export function reference(sentence: string): { from: number; to: number; rest: s
   return r && { from: r.from, to: r.to, rest: sentence.slice(r.end) };
 }
 
-const sentences = (text: string): string[] => text.match(/[^。！？!?.]+[。！？!?.]?/g)?.map((x) => x.trim()).filter(Boolean) ?? [];
+export const sentences = (text: string): string[] => text.match(/[^。！？!?.]+[。！？!?.]?/g)?.map((x) => x.trim()).filter(Boolean) ?? [];
 const join = (a: string, b: string): string => (!a ? b : !b ? a : a + (CJK.test(a.slice(-1) + b[0]) ? '' : ' ') + b);   // Chinese joins without a space
 /* words cut off before a photo number mid-sentence lose the "and, okay," that led into it and get a full stop */
 function close(s: string): string {

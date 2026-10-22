@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, PanResponder, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
+import { AudioPlayer, createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { hyphenateSync } from 'hyphen/en';
 import { CN, Metric, SERIF } from './metrics';
 import { Mosaic } from './Photos';
 import { Pic, Placed, Pos, Said } from './session';
+import { fileUri } from './store';
 import { SZ } from './theme';
 import { useFace, useLang, useS, useT } from './ui';
 
@@ -25,7 +27,7 @@ export function Stream({ items, onEdit }: { items: Said[]; onEdit?: (i: number) 
   const tx = useTx();
   return (
     <View style={{ gap: 16 }}>
-      {items.map((x, i) => (x.kind === 'talk' && !x.text ? null : (
+      {items.map((x, i) => (x.kind === 'head' || (x.kind === 'talk' && !x.text) ? null : (
         <Text key={i} style={tx} onPress={onEdit && x.kind === 'talk' ? () => onEdit(i) : undefined}>
           {x.kind === 'talk' ? x.text : x.parts.map((p) => p.spoken ?? p.text).join(S.is === '是' ? '' : ' ')}
         </Text>
@@ -68,14 +70,16 @@ function cuts(word: string): number[] {
 
 /* A photo belongs to one paragraph and covers whole lines, so it never runs into the next paragraph (which starts
    below it) and its edges sit PAD from the ink of the lines above and below, as they do from the words beside it. */
-function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number) {
+/* heads: room kept above each paragraph for its time heading and voice bar; tops: where that room starts */
+function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number, heads: number[] = []) {
   const e = PAD - (lh - size) / 2;                // how far a photo's edge sits inside its first and last line
   const minSeg = size * 4;                        // a gap beside a photo narrower than this stays empty
-  const lines: Line[] = [], starts: number[] = [], rows: number[] = [];
+  const lines: Line[] = [], starts: number[] = [], rows: number[] = [], tops: number[] = [];
   const rects: Record<string, Rect> = {};
   let y = 0;
   paras.forEach((para, pi) => {
-    const start = y;
+    tops.push(y);
+    const start = y + (heads[pi] ?? 0);
     starts.push(start);
     const own = spots.filter((sp) => sp.p === pi).map((sp) => ({ sp, y0: start + sp.k * lh, y1: start + (sp.k + sp.n) * lh }));
     for (const { sp, y0 } of own) rects[sp.key] = { x: sp.x, y: y0 + e, w: sp.w, h: sp.n * lh - 2 * e };
@@ -123,7 +127,7 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
     rows.push(Math.round((ly - start) / lh));
     y = Math.max(ly, ...own.map((o) => o.y1)) + gap;
   });
-  return { lines, starts, rows, rects, height: Math.max(0, y - gap) };
+  return { lines, starts, rows, rects, tops, height: Math.max(0, y - gap) };
 }
 
 /* a photo let go with its top-left at (x, y): the paragraph its top falls in, the nearest line, and the whole number
@@ -197,8 +201,9 @@ export const solo = (w: number) => cluster(1, w)[0];
    English lines up at both edges like Chinese. Drag any photo and the paragraphs reflow around it; where it ends up
    is kept. A photo carried in from the tray (preview) moves the words before it is let go. Tap a word to edit it. */
 type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
-export function Page({ items, photos, placed, moved, preview, title, meta, area, onDrag, onMove, onEdit }: {
+export function Page({ items, photos, placed, moved, preview, voice, title, meta, area, onDrag, onMove, onEdit }: {
   items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; preview?: { pics: Pic[]; x: number; y: number } | null;
+  voice?: boolean;                                                // voice bars at the top left of what was said (a setting)
   title: string; meta: string;
   area?: React.RefObject<View | null>;                           // the text area, for finding where a photo from the tray was dropped
   onDrag: (on: boolean) => void; onMove: (key: string, at: Pos) => void; onEdit: (item: number, part: number) => void;
@@ -209,25 +214,38 @@ export function Page({ items, photos, placed, moved, preview, title, meta, area,
   const W = Dimensions.get('window').width - 2 * SZ.px;     // the page is today itself: no card, the full width
   const size = zh ? 14 : 15, lh = zh ? 21 : 19.5, gap = 13;
   const m = zh ? CN : SERIF;
-  const run = (spots: Spot[]) => flow(paras, spots, W, m, size, lh, gap);
+  const run = (spots: Spot[]) => flow(paras, spots, W, m, size, lh, gap, heads);
 
   /* one paragraph per recording; a recording about photos brings its photos (a group counts as one tile) */
   const paras: string[] = [];
   const srcs: Src[][] = [];
   const sets: { para: number; tiles: { key: string; pics: Pic[] }[] }[] = [];
+  /* above a paragraph: the time heading before it, and a voice bar where a new stretch of talking starts. Recordings
+     belong to one bar while each starts within 20 minutes of the last one ending; a longer break starts a new bar */
+  const marks: { head?: string; bar?: Bar }[] = [];
+  let head: string | undefined, bar: Bar | undefined, open: Bar | undefined, lastEnd = 0;
+  const para = (text: string, from: Src[]) => { paras.push(text); srcs.push(from); marks.push({ head, bar }); head = undefined; bar = undefined; };
   items.forEach((x, i) => {
-    if (x.kind === 'talk') { if (x.text) { paras.push(x.text); srcs.push([{ item: i, part: -1, from: 0 }]); } return; }
+    if (x.kind === 'head') { head = x.text; return; }
+    if (voice && x.audio) {
+      if (!open || (x.at && lastEnd && x.at - lastEnd >= 20 * 60 * 1000)) { open = { uris: [], secs: 0, at: x.at }; bar = open; }
+      open.uris.push(fileUri(x.audio)); open.secs += x.secs ?? 0;
+      if (x.at) lastEnd = x.at + (x.secs ?? 0) * 1000;
+    }
+    if (x.kind === 'talk') { if (x.text) para(x.text, [{ item: i, part: -1, from: 0 }]); return; }
     const tiles = x.parts.map((p, j) => ({ key: `${i}-${j}`, pics: p.unit.idx.map((k) => photos[k]).filter(Boolean) })).filter((tl) => tl.pics.length);
     for (let c = 0; c < tiles.length; c += 4) sets.push({ para: paras.length, tiles: tiles.slice(c, c + 4) });
     let text = '';                                  // captions join with a space, except next to Chinese
-    srcs.push(x.parts.map((p, j) => {
+    const from = [...x.parts.map((p, j) => {
       if (text && p.text && !CJK.test(text.slice(-1) + p.text[0])) text += ' ';
       const at = { item: i, part: j, from: text.length };
       text += p.text;
       return at;
-    }));
-    paras.push(text);
+    })];
+    para(text, from);
   });
+  const HEAD = 26, BAR = 30;
+  const heads = marks.map((mk) => (mk.head ? HEAD : 0) + (mk.bar ? BAR : 0));
   const e = PAD - (lh - size) / 2;
   const linesFor = (h: number) => Math.max(2, Math.round((h + 2 * e) / lh));
 
@@ -268,7 +286,7 @@ export function Page({ items, photos, placed, moved, preview, title, meta, area,
     return sp;
   })];
   const ghost = preview ? toSpot('preview', preview.x, preview.y, one.w, one.h, base, W, lh, size) : null;
-  const { lines, rects, height } = run(ghost ? [...spots, ghost] : spots);
+  const { lines, rects, tops, height } = run(ghost ? [...spots, ghost] : spots);
   const tiles: { key: string; pics: Pic[]; r: Rect }[] = [];
   for (const b of blocks) {
     const r = rects[b.spot.key], sy = r.h / b.ch;
@@ -334,10 +352,12 @@ export function Page({ items, photos, placed, moved, preview, title, meta, area,
     const narrow = l.w < W * 0.6;                   // a column beside a photo: its edge faces the photo, so it stretches further
     const each = !l.last && cuts > 0 && room > 0 && room / cuts <= size * (chars ? 0.3 : narrow ? 1.5 : 0.6) ? room / cuts : 0;
     if (chars) {
-      const step = (x: number) => Math.max(0, Math.min(toks.length - 1, Math.floor(x / ((natural / toks.length) + each))));
+      /* letter spacing also follows the last character, so the room is shared by every character, less a little slack */
+      const ls = each ? Math.max(0, (room - 2) / toks.length) : 0;
+      const step = (x: number) => Math.max(0, Math.min(toks.length - 1, Math.floor(x / ((natural / toks.length) + ls))));
       return (
-        <Text key={li} numberOfLines={1} onPress={(ev) => edit(l.p, toks[step(ev.nativeEvent.locationX)].o)}
-          style={[ink, { left: l.x, top: l.y, letterSpacing: each }]}>{toks.map((tk) => tk.s).join('')}</Text>
+        <Text key={li} numberOfLines={1} ellipsizeMode="clip" onPress={(ev) => edit(l.p, toks[step(ev.nativeEvent.locationX)].o)}
+          style={[ink, { left: l.x, top: l.y, letterSpacing: ls }]}>{toks.map((tk) => tk.s).join('')}</Text>
       );
     }
     let x = l.x;
@@ -350,9 +370,15 @@ export function Page({ items, photos, placed, moved, preview, title, meta, area,
 
   return (
     <View style={d.page}>
-      <Text style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text>
+      {title ? <Text style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text> : null}
       {meta ? <Text style={[d.meta, { color: t.mut }]}>{meta}</Text> : null}
       <View ref={area} collapsable={false} style={{ height, marginTop: 12 }}>
+        {marks.map((mk, pi) => (
+          <React.Fragment key={`m${pi}`}>
+            {mk.head ? <Text style={[d.head, { top: tops[pi], color: t.ink, fontFamily: face.title }]}>{mk.head}</Text> : null}
+            {mk.bar ? <View style={{ position: 'absolute', left: 0, top: tops[pi] + (mk.head ? HEAD : 0) }}><VoiceBar bar={mk.bar} /></View> : null}
+          </React.Fragment>
+        ))}
         {lines.map(setLine)}
         {tiles.map((tl) => (
           <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} grab={grab} drag={drag} pinch={pinch} drop={drop}>
@@ -371,7 +397,57 @@ export function Page({ items, photos, placed, moved, preview, title, meta, area,
   );
 }
 
+/* ---------- a voice bar: the recordings of one stretch of talking, played one after another ---------- */
+type Bar = { uris: string[]; secs: number; at?: number };
+const clock = (ms: number) => { const t = new Date(ms); return `${t.getHours()}:${String(t.getMinutes()).padStart(2, '0')}`; };
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+function VoiceBar({ bar }: { bar: Bar }) {
+  const t = useT();
+  const [on, setOn] = useState(false);
+  const player = useRef<AudioPlayer | null>(null);
+  useEffect(() => () => { player.current?.remove(); }, []);
+  /* a small waveform drawn from the file name, so each bar looks a little different and stays the same */
+  const waves = useMemo(() => {
+    let h = 7;
+    for (const ch of bar.uris[0] ?? '') h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return Array.from({ length: 13 }, (_, i) => 3 + ((h >>> (i * 2)) % 8));
+  }, [bar.uris]);
+  function playFrom(i: number) {
+    player.current?.remove();
+    player.current = null;
+    if (i >= bar.uris.length) { setOn(false); return; }
+    const p = createAudioPlayer({ uri: bar.uris[i] });
+    p.addListener('playbackStatusUpdate', (st) => { if (st.didJustFinish) playFrom(i + 1); });
+    player.current = p;
+    p.play();
+  }
+  function toggle() {
+    if (on) { player.current?.pause(); setOn(false); return; }
+    setOn(true);
+    setAudioModeAsync({ playsInSilentMode: true }).catch(() => {}).finally(() => { if (player.current) player.current.play(); else playFrom(0); });
+  }
+  const label = [bar.secs ? mmss(bar.secs) : '', bar.at ? clock(bar.at) : ''].filter(Boolean).join(' · ');
+  return (
+    <Pressable onPress={toggle} hitSlop={6} accessibilityRole="button" accessibilityLabel={label || 'voice'}
+      style={({ pressed }) => [d.bar, { backgroundColor: t.panel, opacity: pressed ? 0.75 : 1 }]}>
+      <View style={[d.play, { backgroundColor: t.red }]}>
+        {on ? <View style={d.pause}><View style={d.pauseBar} /><View style={d.pauseBar} /></View> : <View style={d.tri} />}
+      </View>
+      <View style={d.waves}>{waves.map((hh, i) => <View key={i} style={{ width: 2, height: hh, borderRadius: 1, backgroundColor: on ? t.ink : t.mut, opacity: on ? 0.9 : 0.55 }} />)}</View>
+      {label ? <Text style={[d.barT, { color: t.mut }]}>{label}</Text> : null}
+    </Pressable>
+  );
+}
+
 const d = StyleSheet.create({
+  head: { position: 'absolute', left: 0, fontSize: 14.5, lineHeight: 20, fontWeight: '600' },
+  bar: { flexDirection: 'row', alignItems: 'center', gap: 7, height: 22, paddingLeft: 3, paddingRight: 9, borderRadius: 11 },
+  play: { width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  tri: { width: 0, height: 0, marginLeft: 1.5, borderLeftWidth: 6, borderTopWidth: 4, borderBottomWidth: 4, borderLeftColor: '#fff', borderTopColor: 'transparent', borderBottomColor: 'transparent' },
+  pause: { flexDirection: 'row', gap: 2 },
+  pauseBar: { width: 2, height: 7, borderRadius: 1, backgroundColor: '#fff' },
+  waves: { flexDirection: 'row', alignItems: 'center', gap: 1.5, height: 12 },
+  barT: { fontSize: 11, letterSpacing: 0.2, fontVariant: ['tabular-nums'] },
   tx: { fontSize: 16, lineHeight: 29 },
   txEn: { fontSize: 17.5, lineHeight: 27 },
   page: { paddingTop: 6 },
