@@ -150,14 +150,18 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
         const a = sp.x - PAD, b = sp.x + sp.w + PAD;
         segs = segs.flatMap(([s, f]) => (b <= s || a >= f ? [[s, f]] : [[s, Math.max(s, a)], [Math.min(f, b), f]] as [number, number][]));
       }
+      let near = false;                            // a sticker cuts this line: only a roomy gap beside it takes words
       for (const fl of floats) {
         if (fl.p > pi) continue;
         let a = Infinity, b = -Infinity;
+        /* a little more than the line itself is looked at, so the edge of the words eases around the sticker's shape
+           instead of stepping in and out line by line */
         for (const pt of fl.pts) {
           const yy = tops[fl.p] + pt.y;
-          if (yy >= ly - 1 && yy <= ly + lh + 1) { if (pt.x < a) a = pt.x; if (pt.x > b) b = pt.x; }
+          if (yy >= ly - lh * 0.35 && yy <= ly + lh * 1.35) { if (pt.x < a) a = pt.x; if (pt.x > b) b = pt.x; }
         }
         if (a > b) continue;
+        near = true;
         a -= PAD; b += PAD;
         /* the words go down the wider side only, so a line never jumps across the sticker mid-sentence */
         segs = segs.flatMap(([s, f]): [number, number][] => {
@@ -166,7 +170,7 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
           return [left[1] - left[0] >= right[1] - right[0] ? left : right];
         });
       }
-      return segs.filter(([s, f]) => f - s >= minSeg);
+      return segs.filter(([s, f]) => f - s >= (near ? size * 7 : minSeg));
     };
     const tk = tokens(para);
     const at: number[] = [];
@@ -245,7 +249,7 @@ function Movable({ id, r, z, W, locked, block, grab, move, drop, children }: {
 }) {
   const x = useSharedValue(r.x), y = useSharedValue(r.y), w = useSharedValue(r.w), h = useSharedValue(r.h);
   const home = useSharedValue(r);                  // where the page keeps it
-  const live = useSharedValue(0);                  // gestures under way (one finger, two)
+  const live = useSharedValue(0);                  // the gestures under way, as bits (1 one finger, 2 two)
   const lift = useSharedValue(1);
   const size = useSharedValue({ w: 0, h: 0 });   // its size when two fingers came down
   const last = useSharedValue({ x: 0, y: 0, n: 0 });   // the finger's last position and how many fingers were down
@@ -262,15 +266,18 @@ function Movable({ id, r, z, W, locked, block, grab, move, drop, children }: {
   }, [r.x, r.y, r.w, r.h, home, live, x, y, w, h]);
   /* eslint-disable react-hooks/refs -- the gesture's callbacks run during a gesture, on the UI thread, never while rendering */
   const gesture = useMemo(() => {
-    const begin = () => {
+    /* each gesture marks itself on when it starts and off when it is over in any way (onFinalize always runs, even when a
+       gesture is cancelled), so the photo can never be left thinking it is still held */
+    const begin = (bit: number) => {
       'worklet';
       if (live.get() === 0) { lift.set(withSpring(1.04, SPRING)); scheduleOnRN(onGrab, id); }
-      live.set(live.get() + 1);
+      live.set(live.get() | bit);
     };
-    const end = () => {
+    const end = (bit: number) => {
       'worklet';
-      live.set(live.get() - 1);
-      if (live.get() > 0) return;
+      if (!(live.get() & bit)) return;
+      live.set(live.get() & ~bit);
+      if (live.get() !== 0) return;
       lift.set(withSpring(1, SPRING));
       scheduleOnRN(onDrop);
       const to = home.get();
@@ -279,7 +286,7 @@ function Movable({ id, r, z, W, locked, block, grab, move, drop, children }: {
     /* the photo moves by how far the fingers moved since the last frame; the frame a finger lands or lifts (when their
        centre jumps) it doesn't move at all, so adding or lifting a finger never makes it jump */
     const pan = Gesture.Pan().enabled(!locked).minDistance(2).averageTouches(true)
-      .onStart((e) => { last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers }); begin(); })
+      .onStart((e) => { last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers }); begin(1); })
       .onUpdate((e) => {
         const l = last.get();
         last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers });
@@ -289,15 +296,15 @@ function Movable({ id, r, z, W, locked, block, grab, move, drop, children }: {
         x.set(nx); y.set(ny);
         scheduleOnRN(onMove, id, nx, ny, ww);
       })
-      .onEnd(end);
+      .onFinalize(() => end(1));
     const pinch = Gesture.Pinch().enabled(!locked)
-      .onStart(() => { size.set({ w: w.get(), h: h.get() }); begin(); })
+      .onStart(() => { size.set({ w: w.get(), h: h.get() }); begin(2); })
       .onUpdate((e) => {
         const s0 = size.get(), nw = Math.max(W * 0.25, Math.min(W, s0.w * e.scale)), nx = Math.min(x.get(), W - nw);
         w.set(nw); h.set(s0.h * nw / s0.w); x.set(nx);
         scheduleOnRN(onMove, id, nx, y.get(), nw);
       })
-      .onEnd(end);
+      .onFinalize(() => end(2));
     if (block && Platform.OS !== 'web') { pan.blocksExternalGesture(block as never); pinch.blocksExternalGesture(block as never); }
     return Gesture.Simultaneous(pan, pinch);
   }, [id, W, locked, block, onGrab, onMove, onDrop, x, y, w, h, home, live, lift, size, last]);
@@ -352,7 +359,7 @@ function Stuck({ st, top, W, source, slap, locked, bin, block, place, carry, sli
   }, [slap, pop]);
   /* eslint-disable react-hooks/refs -- the gesture's callbacks run during a gesture, on the UI thread, never while rendering */
   const gesture = useMemo(() => {
-    const begin = () => { 'worklet'; if (live.get() === 0) scheduleOnRN(onTap, null); live.set(live.get() + 1); };
+    const begin = (bit: number) => { 'worklet'; if (live.get() === 0) scheduleOnRN(onTap, null); live.set(live.get() | bit); };
     /* a sticker the words go around tells the page where it is now, so they move out of its way while it is held */
     const report = () => {
       'worklet';
@@ -360,10 +367,11 @@ function Stuck({ st, top, W, source, slap, locked, bin, block, place, carry, sli
       const w0 = bw.get(), w2 = w0 * sc.get(), cx = bx.get() + w0 / 2 + dx.get(), cy = by.get() + w0 / 2 + dy.get();
       scheduleOnRN(onSlide, id, cx - w2 / 2, cy - w2 / 2, w2, br.get() + rot.get());
     };
-    const end = () => {
+    const end = (bit: number) => {
       'worklet';
-      live.set(live.get() - 1);
-      if (live.get() > 0) return;
+      if (!(live.get() & bit)) return;              // marked off in onFinalize, which always runs: never left held
+      live.set(live.get() & ~bit);
+      if (live.get() !== 0) return;
       if (over.get() >= 0) scheduleOnRN(onCarry, null);
       if (over.get() === 1) { over.set(-1); scheduleOnRN(onPlace, id, null); return; }
       over.set(-1);
@@ -376,7 +384,7 @@ function Stuck({ st, top, W, source, slap, locked, bin, block, place, carry, sli
       scheduleOnRN(onPlace, id, { x: nx, y: ny, w: Math.round(w2), r: nr });
     };
     const pan = Gesture.Pan().enabled(!locked).minDistance(2).averageTouches(true)
-      .onStart((e) => { last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers }); begin(); })
+      .onStart((e) => { last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers }); begin(1); })
       .onUpdate((e) => {
         const l = last.get();
         last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers });
@@ -386,15 +394,15 @@ function Stuck({ st, top, W, source, slap, locked, bin, block, place, carry, sli
         if (now !== over.get()) { over.set(now); scheduleOnRN(onCarry, now ? 'over' : 'on'); }
         report();
       })
-      .onEnd(end);
+      .onFinalize(() => end(1));
     const pinch = Gesture.Pinch().enabled(!locked)
-      .onStart(() => { s0.set(sc.get()); begin(); })
+      .onStart(() => { s0.set(sc.get()); begin(2); })
       .onUpdate((e) => { sc.set(s0.get() * e.scale); report(); })
-      .onEnd(end);
+      .onFinalize(() => end(2));
     const turn = Gesture.Rotation().enabled(!locked)
-      .onStart(() => { r0.set(rot.get()); begin(); })
+      .onStart(() => { r0.set(rot.get()); begin(4); })
       .onUpdate((e) => { rot.set(r0.get() + e.rotation * 180 / Math.PI); report(); })
-      .onEnd(end);
+      .onFinalize(() => end(4));
     if (block && Platform.OS !== 'web') for (const g of [pan, pinch, turn]) g.blocksExternalGesture(block as never);
     const touch = Gesture.Tap().enabled(!locked).maxDuration(300).onEnd((_e, ok) => { if (ok) scheduleOnRN(onTap, id); });
     return Gesture.Race(touch, Gesture.Simultaneous(pan, pinch, turn));
@@ -738,7 +746,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     const chars = toks.every((tk) => tk.s.length === 1);
     const room = l.w - natural;
     const narrow = l.w < W * 0.6;                   // a column beside a photo: its edge faces the photo, so it stretches further
-    const each = !l.last && cuts > 0 && room > 0 && room / cuts <= size * (chars ? 0.3 : narrow ? 1.5 : 0.6) ? room / cuts : 0;
+    const each = !l.last && cuts > 0 && room > 0 && room / cuts <= size * (chars ? 0.3 : narrow ? 0.9 : 0.6) ? room / cuts : 0;
     const mark = marked(l.p) ? (
       <View key={`h${key}`} pointerEvents="none" style={[d.marker, { left: l.x - 3, top: l.y + 2, width: (each || (chars && room > 0 && !l.last) ? l.w : natural) + 6, height: lh - 3, backgroundColor: t.glow }]} />
     ) : null;
