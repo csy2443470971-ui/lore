@@ -34,7 +34,7 @@ export function Week({ days, keys, labelOf, title, voice, indent, onTitle, onOpe
               {!has ? <Text style={[w.none, { color: t.mut, fontFamily: face.body }]}>{S.weekNone}</Text> : null}
               {has && d.laid > 0 ? (
                 <Page items={d.said.slice(0, d.laid)} photos={d.photos} placed={d.placed} moved={d.moved} voice={voice} indent={indent} title="" meta=""
-                  onDrag={still} onMove={still} onEdit={() => onDay(k)} />
+                  onDrag={still} onMove={still} onEdit={() => onDay(k)} locked />
               ) : null}
               {has && d.said.length > d.laid ? <Stream items={d.said.slice(d.laid)} onEdit={() => onDay(k)} /> : null}
             </View>

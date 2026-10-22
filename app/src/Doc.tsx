@@ -1,5 +1,8 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, PanResponder, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Dimensions, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Re, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { Image } from 'expo-image';
 import { AudioPlayer, createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
@@ -36,6 +39,22 @@ export function Stream({ items, onEdit }: { items: Said[]; onEdit?: (i: number) 
     </View>
   );
 }
+
+/* A line of words, set once: it re-renders only when its own words, place or spacing change, so a reflow while a photo
+   is dragged redraws just the lines that moved. A Chinese line is one piece (letter-spaced); an English line, a word each. */
+type Ink = { fontSize: number; lineHeight: number; color: string; fontFamily: string };
+type Tap = (p: number, o: number) => void;
+const Chars = React.memo(function Chars({ text, x, y, ls, unit, p, o0, ink, tap, hold }: {
+  text: string; x: number; y: number; ls: number; unit: number; p: number; o0: number; ink: Ink; tap: Tap; hold?: (p: number) => void;
+}) {
+  return (
+    <Text numberOfLines={1} ellipsizeMode="clip" onPress={(ev) => tap(p, o0 + Math.max(0, Math.min(text.length - 1, Math.floor(ev.nativeEvent.locationX / unit))))}
+      onLongPress={hold ? () => hold(p) : undefined} style={[ink, { position: 'absolute', left: x, top: y, letterSpacing: ls }]}>{text}</Text>
+  );
+});
+const Word = React.memo(function Word({ s, x, y, p, o, ink, tap, hold }: { s: string; x: number; y: number; p: number; o: number; ink: Ink; tap: Tap; hold?: (p: number) => void }) {
+  return <Text numberOfLines={1} onPress={() => tap(p, o)} onLongPress={hold ? () => hold(p) : undefined} style={[ink, { position: 'absolute', left: x, top: y }]}>{s}</Text>;
+});
 
 /* The page's paragraphs and photo tiles, keyed as the page keys them ('t<first item>' for a paragraph, the tile's own
    key for a photo or group), for choosing what goes on a share image */
@@ -161,158 +180,159 @@ function toSpot(key: string, x: number, y: number, w: number, h: number, base: {
   return { key, x: Math.max(0, Math.min(W - w, sx)), w, p, k, n: Math.max(2, Math.round((h + 2 * e) / lh)) };
 }
 
-/* one photo (or group) on the page that can be dragged anywhere with one finger, and made bigger or smaller with two;
-   the words get out of its way. While it is held, the photo is drawn exactly where the finger has it, as an offset and a
-   scale over the place the page keeps for it (so following the finger re-renders nothing); let go, it springs into that
-   place. The responder is made once, so a drag isn't reset as the page reflows under the finger. */
-function Movable({ id, r, z, grab, drag, pinch, drop, children }: {
-  id: string; r: Rect; z: number; grab: (id: string, from: Rect) => void;
-  drag: (id: string, dx: number, dy: number) => Rect | null; pinch: (id: string, scale: number) => Rect | null;
-  drop: () => void; children: React.ReactNode;
-}) {
-  const lift = useState(() => new Animated.Value(1))[0];
-  const pan = useState(() => new Animated.ValueXY())[0];
-  const grow = useState(() => new Animated.Value(1))[0];
-  const hold = useRef({ r, held: false, want: null as Rect | null, off: { x: 0, y: 0 }, g: 1 });
-  useEffect(() => {
-    const a = pan.addListener((v) => { hold.current.off = v; });
-    const b = grow.addListener((v) => { hold.current.g = v.value; });
-    return () => { pan.removeListener(a); grow.removeListener(b); };
-  }, [pan, grow]);
-  const show = useCallback((to: Rect, base: Rect) => {
-    hold.current.off = { x: to.x - base.x, y: to.y - base.y }; hold.current.g = to.w / base.w;
-    pan.setValue(hold.current.off); grow.setValue(hold.current.g);
-  }, [pan, grow]);
-  const home = useCallback(() => {
-    const spring = { useNativeDriver: true, friction: 9, tension: 80 };
-    Animated.parallel([Animated.spring(pan, { ...spring, toValue: { x: 0, y: 0 } }), Animated.spring(grow, { ...spring, toValue: 1 })])
-      .start(({ finished }) => { if (finished) hold.current.want = null; });
-  }, [pan, grow]);
-  /* the page moved the photo's place (the words reflowed, or it was let go): keep it where it is on screen */
-  useLayoutEffect(() => {
-    const s0 = hold.current, prev = s0.r;
-    s0.r = r;
-    if (prev.x === r.x && prev.y === r.y && prev.w === r.w) return;
-    if (s0.held && s0.want) show(s0.want, r);
-    else if (s0.want) { show(s0.want, r); home(); }
-  }, [r, show, home]);
-  const pr = useMemo(() => {
-    const two = { spread: 0 };                     // the distance between two fingers when the second one came down
-    const to = (want: Rect | null) => { if (want) { hold.current.want = want; show(want, hold.current.r); } };
-    const settle = () => {
-      two.spread = 0; hold.current.held = false;
-      drop();
-      home();
-      Animated.spring(lift, { toValue: 1, useNativeDriver: true, friction: 6 }).start();
-    };
-    /* the handlers only run during a gesture, never while rendering */
-    // eslint-disable-next-line react-hooks/refs
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => {
-        pan.stopAnimation(); grow.stopAnimation();
-        const s0 = hold.current, from = { x: s0.r.x + s0.off.x, y: s0.r.y + s0.off.y, w: s0.r.w * s0.g, h: s0.r.h * s0.g };
-        s0.held = true; s0.want = from;
-        grab(id, from);
-        Haptics.selectionAsync().catch(() => {});
-        Animated.spring(lift, { toValue: 1.04, useNativeDriver: true, friction: 6 }).start();
-      },
-      onPanResponderMove: (ev, g) => {
-        const tt = ev.nativeEvent.touches;
-        if (tt.length >= 2) {
-          const dist = Math.hypot(tt[0].pageX - tt[1].pageX, tt[0].pageY - tt[1].pageY);
-          if (!two.spread) two.spread = dist || 1;
-          to(pinch(id, dist / two.spread));
-        } else if (!two.spread) to(drag(id, g.dx, g.dy));   // once pinched, lifting one finger doesn't make the photo jump
-      },
-      onPanResponderRelease: settle,
-      onPanResponderTerminate: settle,
-    });
-  }, [id, grab, drag, pinch, drop, lift, pan, grow, show, home]);
+/* Photos and stickers are moved by gestures that run on the UI thread (Gesture Handler + Reanimated): what the finger
+   holds follows it every frame however busy the words are with reflowing, and the page doesn't scroll under it. */
+const SPRING = { damping: 22, stiffness: 260, mass: 0.6 };
+
+/* a group of photos that fills whatever size its tile has, so it can grow and shrink smoothly */
+function Fluid({ pics }: { pics: Pic[] }) {
+  const t = useT();
+  const four = pics.length >= 4, list = pics.slice(0, four ? 4 : 2);
+  const cell = (p: Pic, i: number) => <Image key={i} source={src(p)} contentFit="cover" style={{ flex: 1 }} />;
   return (
-    <Animated.View {...pr.panHandlers} style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, zIndex: z, transformOrigin: 'top left', transform: [...pan.getTranslateTransform(), { scale: grow }] }}>
-      <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale: lift }] }]}>
-        {/* the photo itself takes no touches: on the web an <img> would start the browser's own image drag and end ours */}
+    <View style={[StyleSheet.absoluteFill, { borderRadius: 8, overflow: 'hidden', gap: 2, backgroundColor: t.gray }]}>
+      {four ? [0, 2].map((k) => <View key={k} style={{ flex: 1, flexDirection: 'row', gap: 2 }}>{list.slice(k, k + 2).map(cell)}</View>)
+        : <View style={{ flex: 1, flexDirection: 'row', gap: 2 }}>{list.map(cell)}</View>}
+    </View>
+  );
+}
+
+/* one photo (or group) on the page: one finger drags it anywhere, two make it bigger or smaller (from its top-left
+   corner, between a quarter of the page and all of it). While it is held the page hears where it is, a few times a
+   frame at most, and makes room for it; let go, it settles into the place the words left for it. When the words move
+   it (another photo was dragged, the page was laid out again) it glides to its new place. */
+function Movable({ id, r, z, W, locked, block, grab, move, drop, children }: {
+  id: string; r: Rect; z: number; W: number; locked?: boolean; block?: React.RefObject<unknown>;
+  grab: (id: string) => void; move: (id: string, x: number, y: number, w: number) => void; drop: () => void; children: React.ReactNode;
+}) {
+  const x = useSharedValue(r.x), y = useSharedValue(r.y), w = useSharedValue(r.w), h = useSharedValue(r.h);
+  const home = useSharedValue(r);                  // where the page keeps it
+  const live = useSharedValue(0);                  // gestures under way (one finger, two)
+  const from = useSharedValue({ x: 0, y: 0, w: 0, h: 0 });
+  const lift = useSharedValue(1);
+  const size = useSharedValue({ w: 0, h: 0 });   // its size when two fingers came down
+  useEffect(() => {
+    const to = { x: r.x, y: r.y, w: r.w, h: r.h };
+    home.set(to);
+    if (live.get() === 0) { x.set(withSpring(to.x, SPRING)); y.set(withSpring(to.y, SPRING)); w.set(withSpring(to.w, SPRING)); h.set(withSpring(to.h, SPRING)); }
+  }, [r.x, r.y, r.w, r.h, home, live, x, y, w, h]);
+  const gesture = useMemo(() => {
+    const begin = () => {
+      'worklet';
+      if (live.get() === 0) { lift.set(withSpring(1.04, SPRING)); scheduleOnRN(grab, id); }
+      live.set(live.get() + 1);
+    };
+    const end = () => {
+      'worklet';
+      live.set(live.get() - 1);
+      if (live.get() > 0) return;
+      lift.set(withSpring(1, SPRING));
+      scheduleOnRN(drop);
+      const to = home.get();
+      x.set(withSpring(to.x, SPRING)); y.set(withSpring(to.y, SPRING)); w.set(withSpring(to.w, SPRING)); h.set(withSpring(to.h, SPRING));
+    };
+    const pan = Gesture.Pan().enabled(!locked).minDistance(2).averageTouches(true)
+      .onStart(() => { from.set({ x: x.get(), y: y.get(), w: w.get(), h: h.get() }); begin(); })
+      .onUpdate((e) => {
+        const f = from.get(), ww = w.get();
+        const nx = Math.max(0, Math.min(W - ww, f.x + e.translationX)), ny = Math.max(0, f.y + e.translationY);
+        x.set(nx); y.set(ny);
+        scheduleOnRN(move, id, nx, ny, ww);
+      })
+      .onEnd(end);
+    const pinch = Gesture.Pinch().enabled(!locked)
+      .onStart(() => { size.set({ w: w.get(), h: h.get() }); begin(); })
+      .onUpdate((e) => {
+        const s0 = size.get(), nw = Math.max(W * 0.25, Math.min(W, s0.w * e.scale)), nx = Math.min(x.get(), W - nw);
+        w.set(nw); h.set(s0.h * nw / s0.w); x.set(nx);
+        scheduleOnRN(move, id, nx, y.get(), nw);
+      })
+      .onEnd(end);
+    if (block && Platform.OS !== 'web') { pan.blocksExternalGesture(block as never); pinch.blocksExternalGesture(block as never); }
+    return Gesture.Simultaneous(pan, pinch);
+  }, [id, W, locked, block, grab, move, drop, x, y, w, h, home, live, from, lift, size]);
+  const style = useAnimatedStyle(() => ({ left: x.get(), top: y.get(), width: w.get(), height: h.get(), transform: [{ scale: lift.get() }] }));
+  return (
+    <GestureDetector gesture={gesture}>
+      <Re.View style={[{ position: 'absolute', zIndex: z }, style]}>
+        {/* the photo itself takes no touches: on the web an <img> would start the browser's own image drag */}
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>{children}</View>
-      </Animated.View>
-    </Animated.View>
+      </Re.View>
+    </GestureDetector>
   );
 }
 
 /* a sticker on the page: it sits over the words, as one does on paper, and the words don't move for it. One finger
-   moves it, two make it bigger or smaller and turn it; carried onto the bin at the bottom of the screen, it comes off.
-   While held it is drawn where the fingers have it (an offset, a scale and a turn over its place), so following them
-   re-renders nothing; let go, its new place is kept. One just put on lands with a small bounce. */
+   moves it, two make it bigger or smaller and turn it; carried onto the bin, it comes off. Let go, its new place is kept.
+   One just put on lands with a small bounce. */
 type Spot2 = { x: number; y: number; w: number; r: number };
-function Stuck({ st, top, source, slap, still, bin, place, carry }: {
-  st: Sticker; top: number; source: number | { uri: string }; slap: boolean; still: boolean;
+function Stuck({ st, top, W, source, slap, locked, bin, block, place, carry }: {
+  st: Sticker; top: number; W: number; source: number | { uri: string }; slap: boolean; locked?: boolean;
   bin?: { x: number; y: number };                 // the bin's centre on the screen
+  block?: React.RefObject<unknown>;
   place: (id: string, at: Spot2 | null) => void; carry?: (state: 'on' | 'over' | null) => void;
 }) {
-  const pan = useState(() => new Animated.ValueXY())[0];
-  const grow = useState(() => new Animated.Value(1))[0];
-  const turn = useState(() => new Animated.Value(0))[0];
-  const pop = useState(() => new Animated.Value(slap ? 1.7 : 1))[0];
-  const tilt = turn.interpolate({ inputRange: [-720, 720], outputRange: ['-720deg', '720deg'] });
+  const bx = useSharedValue(st.x), by = useSharedValue(top + st.y), bw = useSharedValue(st.w), br = useSharedValue(st.r);
+  const dx = useSharedValue(0), dy = useSharedValue(0), sc = useSharedValue(1), rot = useSharedValue(0);
+  const pop = useSharedValue(slap ? 1.7 : 1);
+  const live = useSharedValue(0), over = useSharedValue(-1);   // over: -1 not carried yet, 0 carried, 1 over the bin
+  const s0 = useSharedValue(1), r0 = useSharedValue(0);
+  const binAt = useSharedValue(bin ?? { x: -999, y: -999 });
+  useEffect(() => { binAt.set(bin ?? { x: -999, y: -999 }); }, [bin, binAt]);
+  useEffect(() => {
+    if (live.get() === 0) { bx.set(st.x); by.set(top + st.y); bw.set(st.w); br.set(st.r); }
+  }, [st.x, st.y, st.w, st.r, top, live, bx, by, bw, br]);
   useEffect(() => {
     if (!slap) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    Animated.spring(pop, { toValue: 1, friction: 4.5, tension: 160, useNativeDriver: true }).start();
+    pop.set(withSpring(1, { damping: 9, stiffness: 320, mass: 0.5 }));
   }, [slap, pop]);
-  const g = useRef({ st, top, carry, binAt: bin, dx: 0, dy: 0, s: 1, a: 0, d0: 0, s0: 1, a0: 0, ang0: 0, bin: false, shown: false });
-  useEffect(() => { g.current.st = st; g.current.top = top; g.current.carry = carry; g.current.binAt = bin; });
-  /* its new place has been drawn: the offset goes */
-  useLayoutEffect(() => { pan.setValue({ x: 0, y: 0 }); grow.setValue(1); turn.setValue(0); }, [st.x, st.y, st.w, st.r, top, pan, grow, turn]);
-  const pr = useMemo(() => {
-    const scr = Dimensions.get('window');
-    const inBin = (x: number, y: number) => { const b = g.current.binAt; return !!b && Math.hypot(x - b.x, y - b.y) < 56; };
-    /* the handlers only run during a gesture, never while rendering */
-    // eslint-disable-next-line react-hooks/refs
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => !still,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => {
-        Object.assign(g.current, { dx: 0, dy: 0, s: 1, a: 0, d0: 0, bin: false, shown: false });
-        Haptics.selectionAsync().catch(() => {});
-      },
-      onPanResponderMove: (ev, gs) => {
-        const c = g.current, tt = ev.nativeEvent.touches;
-        if (tt.length >= 2) {
-          const dist = Math.hypot(tt[0].pageX - tt[1].pageX, tt[0].pageY - tt[1].pageY) || 1;
-          const ang = Math.atan2(tt[1].pageY - tt[0].pageY, tt[1].pageX - tt[0].pageX) * 180 / Math.PI;
-          if (!c.d0) { c.d0 = dist; c.ang0 = ang; c.s0 = c.s; c.a0 = c.a; }
-          c.s = c.s0 * dist / c.d0; c.a = c.a0 + ang - c.ang0;
-          grow.setValue(c.s); turn.setValue(c.a);
-        } else if (!c.d0) {                         // once pinched, lifting one finger doesn't make it jump
-          c.dx = gs.dx; c.dy = gs.dy;
-          pan.setValue({ x: c.dx, y: c.dy });
-          /* the screen hears only when the bin should show, or the sticker comes over it or leaves it: nothing else re-renders */
-          const bin = inBin(gs.moveX, gs.moveY);
-          if (!c.shown || bin !== c.bin) {
-            c.shown = true; c.bin = bin;
-            if (bin) Haptics.selectionAsync().catch(() => {});
-            c.carry?.(bin ? 'over' : 'on');
-          }
-        }
-      },
-      onPanResponderRelease: () => {
-        const c = g.current, s0 = c.st;
-        if (c.shown) c.carry?.(null);
-        if (c.bin) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); place(s0.id, null); return; }
-        if (!c.dx && !c.dy && c.s === 1 && !c.a) return;
-        const w = Math.max(44, Math.min(scr.width * 0.8, s0.w * c.s));
-        const cx = s0.x + s0.w / 2 + c.dx, cy = c.top + s0.y + s0.w / 2 + c.dy;
-        place(s0.id, { x: Math.round(cx - w / 2), y: Math.round(cy - w / 2), w: Math.round(w), r: Math.round((s0.r + c.a) * 10) / 10 });
-      },
-      onPanResponderTerminate: () => { if (g.current.shown) g.current.carry?.(null); pan.setValue({ x: 0, y: 0 }); grow.setValue(1); turn.setValue(0); },
-    });
-  }, [still, place, pan, grow, turn]);
+  const gesture = useMemo(() => {
+    const begin = () => { 'worklet'; live.set(live.get() + 1); };
+    const end = () => {
+      'worklet';
+      live.set(live.get() - 1);
+      if (live.get() > 0) return;
+      if (over.get() >= 0 && carry) scheduleOnRN(carry, null);
+      if (over.get() === 1) { over.set(-1); scheduleOnRN(place, st.id, null); return; }
+      over.set(-1);
+      if (!dx.get() && !dy.get() && sc.get() === 1 && !rot.get()) return;
+      /* the new place: the same picture on the screen, written down as the sticker's own place */
+      const w0 = bw.get(), w2 = Math.max(44, Math.min(W * 0.9, w0 * sc.get()));
+      const cx = bx.get() + w0 / 2 + dx.get(), cy = by.get() + w0 / 2 + dy.get();
+      const nx = Math.round(cx - w2 / 2), ny = Math.round(cy - w2 / 2), nr = Math.round((br.get() + rot.get()) * 10) / 10;
+      bx.set(nx); by.set(ny); bw.set(Math.round(w2)); br.set(nr); dx.set(0); dy.set(0); sc.set(1); rot.set(0);
+      scheduleOnRN(place, st.id, { x: nx, y: ny, w: Math.round(w2), r: nr });
+    };
+    const pan = Gesture.Pan().enabled(!locked).minDistance(2).averageTouches(true)
+      .onStart(begin)
+      .onUpdate((e) => {
+        dx.set(e.translationX); dy.set(e.translationY);
+        const b = binAt.get(), now = Math.hypot(e.absoluteX - b.x, e.absoluteY - b.y) < 56 ? 1 : 0;
+        if (now !== over.get()) { over.set(now); if (carry) scheduleOnRN(carry, now ? 'over' : 'on'); }
+      })
+      .onEnd(end);
+    const pinch = Gesture.Pinch().enabled(!locked)
+      .onStart(() => { s0.set(sc.get()); begin(); })
+      .onUpdate((e) => { sc.set(s0.get() * e.scale); })
+      .onEnd(end);
+    const turn = Gesture.Rotation().enabled(!locked)
+      .onStart(() => { r0.set(rot.get()); begin(); })
+      .onUpdate((e) => { rot.set(r0.get() + e.rotation * 180 / Math.PI); })
+      .onEnd(end);
+    if (block && Platform.OS !== 'web') for (const g of [pan, pinch, turn]) g.blocksExternalGesture(block as never);
+    return Gesture.Simultaneous(pan, pinch, turn);
+  }, [st.id, W, locked, block, place, carry, bx, by, bw, br, dx, dy, sc, rot, live, over, s0, r0, binAt]);
+  const style = useAnimatedStyle(() => ({
+    left: bx.get(), top: by.get(), width: bw.get(), height: bw.get(),
+    transform: [{ translateX: dx.get() }, { translateY: dy.get() }, { rotate: `${br.get() + rot.get()}deg` }, { scale: sc.get() * pop.get() }],
+  }));
   return (
-    <Animated.View {...pr.panHandlers} style={[{ position: 'absolute', left: st.x, top: top + st.y, width: st.w, height: st.w, zIndex: 4,
-      transform: [...pan.getTranslateTransform(), { rotate: `${st.r}deg` }, { rotate: tilt }, { scale: Animated.multiply(grow, pop) }] }, d.stickerShadow]}>
-      <Image source={source} contentFit="contain" style={{ width: st.w, height: st.w }} pointerEvents="none" />
-    </Animated.View>
+    <GestureDetector gesture={gesture}>
+      <Re.View style={[{ position: 'absolute', zIndex: 4 }, d.stickerShadow, style]}>
+        <Image source={source} contentFit="contain" style={StyleSheet.absoluteFill} pointerEvents="none" />
+      </Re.View>
+    </GestureDetector>
   );
 }
 
@@ -338,7 +358,7 @@ export const solo = (w: number) => cluster(1, w)[0];
    English lines up at both edges like Chinese. Drag any photo and the paragraphs reflow around it; where it ends up
    is kept. A photo carried in from the tray (preview) moves the words before it is let go. Tap a word to edit it. */
 type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
-export function Page({ items, photos, placed, moved, preview, voice, indent, onTitle, title, meta, area, onDrag, onMove, onEdit, onHold, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag }: {
+export function Page({ items, photos, placed, moved, preview, voice, indent, onTitle, title, meta, area, onDrag, onMove, onEdit, onHold, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
   items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; preview?: { pics: Pic[]; x: number; y: number } | null;
   voice?: boolean;                                                // voice bars at the top left of what was said (a setting)
   indent?: boolean;                                               // first-line indent (a setting)
@@ -353,6 +373,8 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   onSticker?: (id: string, at: Partial<Sticker> | null) => void;  // a sticker moved, turned, resized, or (null) thrown away
   bin?: { x: number; y: number };                                // where the bin for stickers shows on the screen
   onStickerDrag?: (state: 'on' | 'over' | null) => void;         // a sticker is carried (and over the bin), or let go
+  locked?: boolean;                                              // a page only to look at (this week's page): nothing moves
+  scroll?: React.RefObject<unknown>;                             // the page's scroll view, which waits while a photo or sticker is held
 }) {
   const t = useT();
   const face = useFace();
@@ -459,9 +481,9 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   /* positions read from an older version are saved once in paragraph and line */
   const freshKey = JSON.stringify(fresh);
   useEffect(() => { for (const [k, at] of JSON.parse(freshKey) as [string, Pos][]) moveTo.current(k, at); }, [freshKey]);
-  /* the photo under the finger, as it was when picked up: where it was drawn, and its size on the page */
-  const held = useRef({ x: 0, y: 0, w: 0, h: 0 });
-  /* the words reflow only when the photo's place really changes (its paragraph, line, or a few points across), at most once a frame */
+  /* the photo under the finger: its size on the page when it was picked up */
+  const held = useRef({ w: 0, h: 0 });
+  /* the words reflow only when the photo's place really changes (its paragraph, line, or some points across), at most once a frame */
   const shown = useRef('');
   const frame = useRef(0);
   const place = useCallback((id: string, at: Pos) => {
@@ -472,30 +494,19 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
   }, []);
-  const grab = useCallback((id: string, from: Rect) => {
-    const sz = now.current.sizes[id] ?? { w: from.w, h: from.h };
-    held.current = { x: from.x, y: from.y, w: sz.w, h: sz.h };
+  const grab = useCallback((id: string) => {
+    held.current = now.current.sizes[id] ?? { w: 0, h: 0 };
     shown.current = ''; last.current = null;
     setFront(id); onDrag(true);
   }, [onDrag]);
-  const q = (v: number) => Math.round(v / 4) * 4;  // positions kept in steps of 4 points, so the words don't reflow for every pixel
-  const drag = useCallback((id: string, dx: number, dy: number): Rect | null => {
-    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null;
+  const q = (v: number) => Math.round(v / 6) * 6;  // positions kept in steps of 6 points, so the words don't reflow for every pixel
+  /* where the held photo is now (its top-left and width, from the gesture): the place the words make for it */
+  const move = useCallback((id: string, x: number, y: number, w: number) => {
     const hd = held.current;
-    const x = Math.max(0, Math.min(W - hd.w, hd.x + dx)), y = Math.max(0, hd.y + dy);
-    const sp = toSpot(id, x, y, hd.w, hd.h, now.current.base, W, lh, size);
-    place(id, { x: q(sp.x), y, p: sp.p, k: sp.k, w: hd.w });
-    return { x, y, w: hd.w, h: hd.h };
-  }, [W, lh, size, place]);
-  /* two fingers: the photo grows or shrinks from its top-left corner, between a quarter of the page and all of it,
-     always measured against its size when the fingers came down */
-  const pinch = useCallback((id: string, scale: number): Rect | null => {
-    const hd = held.current;
-    if (!hd.w || !Number.isFinite(scale)) return null;
-    const w = Math.max(W * 0.25, Math.min(W, hd.w * scale)), h = hd.h * w / hd.w, x = Math.min(hd.x, W - w);
-    const sp = toSpot(id, x, hd.y, q(w), h, now.current.base, W, lh, size);
-    place(id, { x: q(sp.x), y: hd.y, p: sp.p, k: sp.k, w: q(w) });
-    return { x, y: hd.y, w, h };
+    const same = !hd.w || Math.abs(w - hd.w) < 0.5;
+    const ww = same ? hd.w || w : q(w), h = hd.w ? hd.h * ww / hd.w : ww * 0.75;
+    const sp = toSpot(id, x, y, ww, h, now.current.base, W, lh, size);
+    place(id, { x: q(sp.x), y, p: sp.p, k: sp.k, w: ww });
   }, [W, lh, size, place]);
   const drop = useCallback(() => {
     cancelAnimationFrame(frame.current);
@@ -534,11 +545,18 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   };
   const hold = (p: number) => (onHold && !onChoose ? () => onHold(srcs[p][0].item, p === 0) : undefined);
   const marked = (p: number) => !!chosen?.has(`t${srcs[p][0].item}`);
-  const ink = { position: 'absolute' as const, fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body };
+  const ink = useMemo(() => ({ fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body }), [size, lh, t.ink, face.body]);
+  /* the taps reach the latest page through a ref, so the line pieces keep the same handlers and needn't re-render */
+  const acts = useRef({ edit, hold });
+  useEffect(() => { acts.current = { edit, hold }; });
+  const tap = useCallback((p: number, o: number) => acts.current.edit(p, o), []);
+  const press = useCallback((p: number) => acts.current.hold(p)?.(), []);
+  const canHold = !!onHold && !onChoose;
   /* justified: the room left on a line goes between its words (or characters); the last line of a paragraph, and a
      line where the gaps would grow wide, stay set to the left */
   const setLine = (l: Line, li: number) => {
     const toks = l.toks.map((tk) => ({ ...tk, w: adv(m, size, tk.s.trimEnd()), full: adv(m, size, tk.s) }));
+    const key = `${l.p}:${toks[0]?.o ?? li}`;          // a line is known by its paragraph and first word, not its number
     const natural = toks.reduce((a, tk, j) => a + (j === toks.length - 1 ? tk.w : tk.full), 0);
     const cuts = toks.slice(1).filter((tk) => !NO_START.test(tk.s)).length;
     const chars = toks.every((tk) => tk.s.length === 1);
@@ -546,26 +564,20 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     const narrow = l.w < W * 0.6;                   // a column beside a photo: its edge faces the photo, so it stretches further
     const each = !l.last && cuts > 0 && room > 0 && room / cuts <= size * (chars ? 0.3 : narrow ? 1.5 : 0.6) ? room / cuts : 0;
     const mark = marked(l.p) ? (
-      <View key={`h${li}`} pointerEvents="none" style={[d.marker, { left: l.x - 3, top: l.y + 2, width: (each || (chars && room > 0 && !l.last) ? l.w : natural) + 6, height: lh - 3, backgroundColor: t.glow }]} />
+      <View key={`h${key}`} pointerEvents="none" style={[d.marker, { left: l.x - 3, top: l.y + 2, width: (each || (chars && room > 0 && !l.last) ? l.w : natural) + 6, height: lh - 3, backgroundColor: t.glow }]} />
     ) : null;
     if (chars) {
       /* letter spacing also follows the last character, so the room is shared by every character, less a little slack;
          a line whose closing punctuation hangs past the edge is drawn a hair tighter instead, so it is never cut off */
       const ls = each ? Math.max(0, (room - 2) / toks.length) : room < 0 ? (room - 1) / toks.length : 0;
-      const step = (x: number) => Math.max(0, Math.min(toks.length - 1, Math.floor(x / ((natural / toks.length) + ls))));
-      return (
-        <React.Fragment key={li}>
-          {mark}
-          <Text numberOfLines={1} ellipsizeMode="clip" onPress={(ev) => edit(l.p, toks[step(ev.nativeEvent.locationX)].o)} onLongPress={hold(l.p)}
-            style={[ink, { left: l.x, top: l.y, letterSpacing: ls }]}>{toks.map((tk) => tk.s).join('')}</Text>
-        </React.Fragment>
-      );
+      return [mark, <Chars key={key} text={toks.map((tk) => tk.s).join('')} x={l.x} y={l.y} ls={ls} unit={natural / toks.length + ls} p={l.p} o0={toks[0].o}
+        ink={ink} tap={tap} hold={canHold ? press : undefined} />];
     }
     let x = l.x;
     return [mark, ...toks.map((tk, j) => {
       const at = x;
       x += tk.full + (j < toks.length - 1 && !NO_START.test(toks[j + 1].s) ? each : 0);
-      return <Text key={`${li}-${j}`} numberOfLines={1} onPress={() => edit(l.p, tk.o)} onLongPress={hold(l.p)} style={[ink, { left: at, top: l.y }]}>{tk.s.trimEnd()}</Text>;
+      return <Word key={`${key}-${j}`} s={tk.s.trimEnd()} x={at} y={l.y} p={l.p} o={tk.o} ink={ink} tap={tap} hold={canHold ? press : undefined} />;
     })];
   };
 
@@ -587,9 +599,9 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
         ))}
         {lines.map(setLine)}
         {tiles.map((tl) => (
-          <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} grab={grab} drag={drag} pinch={pinch} drop={drop}>
-            {tl.pics.length > 1 ? <Mosaic pics={tl.pics} w={tl.r.w} h={tl.r.h} r={8} />
-              : <Image source={src(tl.pics[0])} contentFit="cover" style={{ width: tl.r.w, height: tl.r.h, borderRadius: 8 }} />}
+          <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop}>
+            {tl.pics.length > 1 ? <Fluid pics={tl.pics} />
+              : <Image source={src(tl.pics[0])} contentFit="cover" style={[StyleSheet.absoluteFill, { borderRadius: 8 }]} />}
           </Movable>
         ))}
         {onChoose ? tiles.map((tl) => {
@@ -607,8 +619,8 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
           if (!source) return null;
           const p = Math.min(st.p, tops.length - 1);
           return (
-            <Stuck key={st.id} st={st} top={st.p >= 0 && p >= 0 ? tops[p] : 0} source={source} slap={st.id === slap} still={!onSticker || !!onChoose}
-              bin={bin} place={stick} carry={onStickerDrag} />
+            <Stuck key={st.id} st={st} top={st.p >= 0 && p >= 0 ? tops[p] : 0} W={W} source={source} slap={st.id === slap} locked={locked || !onSticker || !!onChoose}
+              bin={bin} block={scroll} place={stick} carry={onStickerDrag} />
           );
         })}
         {ghost && preview ? (
