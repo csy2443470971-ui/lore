@@ -19,7 +19,8 @@ export type Pos = { x: number; y: number; p?: number; k?: number; w?: number };
 /* a sticker on the page: s is one from the set ('set:<name>') or one made from a photo ('file:<path inside Documents>');
    it sits over the words (they don't move for it), y down from the top of paragraph p, x from the left; w its width,
    r its tilt in degrees. p = -1: just put on the page at y from the top, not yet tied to a paragraph */
-export type Sticker = { id: string; s: string; p: number; x: number; y: number; w: number; r: number };
+/* wrap: the words go around its outline (the default for a new one); without it, it sits on top of them */
+export type Sticker = { id: string; s: string; p: number; x: number; y: number; w: number; r: number; wrap?: boolean };
 /* span: a page written over several days (the key is r-<first day>) */
 export type Day = { photos: Pic[]; groups: number[][]; said: Said[]; laid: number; placed?: Placed[]; moved?: Record<string, Pos>;
   stickers?: Sticker[]; span?: { from: string; to: string } };

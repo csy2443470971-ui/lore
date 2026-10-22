@@ -68,6 +68,7 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   const [choosing, setChoosing] = useState<Set<string> | null>(null);   // choosing paragraphs and photos for a share image
   const [sharing, setSharing] = useState(false);
   const [stickerBox, setStickerBox] = useState(false);                  // the sticker box is open
+  const [reading, setReading] = useState<string | null>(null);          // a paragraph opened to select (and copy) its words
   const [bin, setBin] = useState<'on' | 'over' | null>(null);           // a sticker is being carried: the bin shows in the talk key's place
   const [draft, setDraft] = useState('');
   const lift = useRef<{ u: Unit; moved: boolean; carried: boolean } | null>(null);   // a tray photo picked up by a long press
@@ -247,17 +248,6 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   const take = useCallback(() => { if (!lift.current) return false; lift.current.moved = true; return true; }, []);
   const hold = useCallback(() => { if (lift.current) lift.current.carried = true; }, []);
   /* a long press on a paragraph offers to join it to the one above */
-  /* a long press on a paragraph: share it (choosing more), or join it to the one above */
-  const holdPara = (item: number, first: boolean) => {
-    if (recording) return;
-    Haptics.selectionAsync().catch(() => {});
-    const share = () => setChoosing(new Set([`t${item}`]));
-    const opts = first ? [S.shareThis] : [S.shareThis, S.mergeUp];
-    const run = (b: number) => { if (b === 0) share(); else if (b === 1) onMerge(item); };
-    if (Platform.OS === 'ios') ActionSheetIOS.showActionSheetWithOptions({ options: [...opts, S.cancel], cancelButtonIndex: opts.length }, run);
-    else if (Platform.OS === 'web') share();
-    else Alert.alert('', '', [...opts.map((o, b) => ({ text: o, onPress: () => run(b) })), { text: S.cancel, style: 'cancel' as const }]);
-  };
   const choose = (key: string) => setChoosing((c) => {
     const next = new Set(c ?? []);
     if (next.has(key)) next.delete(key); else next.add(key);
@@ -309,9 +299,10 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page key={day} items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
             preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent} onTitle={recording ? undefined : onDate}
-            onDrag={setDragging} onMove={onMove} onEdit={edit} onHold={holdPara}
+            onDrag={setDragging} onMove={onMove} onEdit={edit}
+            onMerge={recording ? undefined : onMerge} onShare={(item) => setChoosing(new Set([`t${item}`]))} onSelect={setReading}
             chosen={choosing ?? undefined} onChoose={choosing ? choose : undefined}
-            stickers={stickers} slap={slap} onSticker={onSticker} bin={binAt} scroll={scroll} onStickerDrag={(st) => { setBin(st); setDragging(!!st); }} /> : null}
+            stickers={stickers} slap={slap} onSticker={onSticker} bin={binAt} scroll={scroll} onStickerDrag={setBin} /> : null}
 
           {showTray ? (
             <View style={{ gap: 10 }}>
@@ -446,6 +437,21 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
             onClose={() => setSharing(false)} onNotice={(text) => onNotice({ text })} />
         );
       })() : null}
+
+      {reading !== null ? (
+        <View style={[StyleSheet.absoluteFill, h.editWrap]}>
+          <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: t.ink + '2E' }]} onPress={() => setReading(null)} />
+          <View style={[h.sheet, { backgroundColor: t.b, paddingBottom: ins.bottom + 16 }]}>
+            <View style={h.sheetBar}>
+              <Text style={{ fontSize: 13, color: t.mut, flex: 1 }}>{S.selectHint}</Text>
+              <Pressable hitSlop={10} onPress={() => setReading(null)}><Text style={{ fontSize: 15, color: t.ink, fontWeight: '600' }}>{S.editDone}</Text></Pressable>
+            </View>
+            {/* not editable, so no keyboard; the words can still be selected with the system's handles, then copied or shared */}
+            <TextInput value={reading} editable={false} multiline scrollEnabled selectionColor={t.red}
+              style={[zh ? h.tx : h.txEn, h.input, { color: t.ink, fontFamily: face.body }]} />
+          </View>
+        </View>
+      ) : null}
 
       {editing ? (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[StyleSheet.absoluteFill, h.editWrap]}>
