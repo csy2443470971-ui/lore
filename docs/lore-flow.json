@@ -1,33 +1,41 @@
 {
  "template": "graph",
  "title": "Lore · how a day becomes a page",
- "subtitle": "Green is you. White is Lore. Dashed is outside models. A day with 5 minutes of talk costs about $0.024 (free) or $0.025 (premium).",
+ "subtitle": "Green is you. Numbered steps run on your phone or on Lore's backend; dashed boxes are outside models. Five minutes of talk a day costs about $0.031 (free) or $0.032 (premium); three quarters of that is transcription.",
  "size": [
-  1200,
-  1270
+  1310,
+  1430
  ],
  "groups": [
   {
    "x": 40,
    "y": 105,
-   "w": 310,
-   "h": 1145,
+   "w": 260,
+   "h": 1260,
    "label": "YOU",
    "fill": "#F1F6F1"
   },
   {
-   "x": 360,
+   "x": 310,
    "y": 105,
-   "w": 560,
-   "h": 1145,
-   "label": "LORE",
+   "w": 330,
+   "h": 1260,
+   "label": "ON YOUR PHONE",
    "fill": "#F7F5F0"
   },
   {
-   "x": 930,
+   "x": 650,
    "y": 105,
-   "w": 250,
-   "h": 1145,
+   "w": 360,
+   "h": 1260,
+   "label": "LORE'S BACKEND",
+   "fill": "#F4F1EA"
+  },
+  {
+   "x": 1020,
+   "y": 105,
+   "w": 280,
+   "h": 1260,
    "label": "OUTSIDE MODELS",
    "fill": "#F3EEE3"
   }
@@ -36,43 +44,93 @@
   {
    "id": "talk",
    "kind": "human",
-   "x": 70,
-   "y": 140,
-   "w": 250,
+   "x": 55,
+   "y": 150,
+   "w": 230,
    "h": 80,
    "name": "Talk, add photos",
    "what": "tap or hold · camera · album"
   },
   {
-   "id": "m_rec",
+   "id": "live",
+   "kind": "step",
+   "x": 330,
+   "y": 140,
+   "w": 290,
+   "h": 100,
+   "name": "Show the words as you talk",
+   "n": 1,
+   "tools": "Apple speech recognition",
+   "what": [
+    "on the phone; it also",
+    "saves the recording"
+   ]
+  },
+  {
+   "id": "tlive",
+   "kind": "step",
+   "x": 670,
+   "y": 140,
+   "w": 320,
+   "h": 100,
+   "name": "Tidy each finished stretch",
+   "n": 2,
+   "tools": "/tidy · DeepSeek V4 Flash",
+   "what": [
+    "at each pause, so the ums drop",
+    "out while you are still talking"
+   ]
+  },
+  {
+   "id": "x_tg",
+   "kind": "ext",
+   "x": 1040,
+   "y": 154,
+   "w": 240,
+   "h": 72,
+   "name": "Together AI",
+   "what": "DeepSeek V4 Flash"
+  },
+  {
+   "id": "stop",
+   "kind": "human",
+   "x": 55,
+   "y": 278,
+   "w": 230,
+   "h": 76,
+   "name": "Stop",
+   "what": "tap again, or let go"
+  },
+  {
+   "id": "m_wav",
    "kind": "material",
-   "x": 540,
-   "y": 142,
+   "x": 425,
+   "y": 300,
    "w": 100,
    "h": 58,
-   "name": "voice, photos",
+   "name": "the recording",
    "icons": [
-    "mic",
-    "image"
+    "mic"
    ]
   },
   {
    "id": "stt",
    "kind": "step",
-   "x": 440,
-   "y": 230,
-   "w": 300,
-   "h": 76,
+   "x": 670,
+   "y": 274,
+   "w": 320,
+   "h": 84,
    "name": "Transcribe the recording",
-   "n": 1,
-   "tools": "Worker · gpt-transcribe"
+   "n": 3,
+   "tools": "OpenAI gpt-transcribe",
+   "what": "the final words come from here"
   },
   {
-   "id": "x_stt",
+   "id": "x_oa",
    "kind": "ext",
-   "x": 960,
-   "y": 236,
-   "w": 210,
+   "x": 1040,
+   "y": 284,
+   "w": 240,
    "h": 64,
    "name": "OpenAI",
    "what": "gpt-transcribe"
@@ -80,8 +138,8 @@
   {
    "id": "m_raw",
    "kind": "material",
-   "x": 540,
-   "y": 326,
+   "x": 780,
+   "y": 392,
    "w": 100,
    "h": 58,
    "name": "raw words",
@@ -92,71 +150,55 @@
   {
    "id": "tidy",
    "kind": "step",
-   "x": 440,
-   "y": 410,
-   "w": 300,
-   "h": 76,
+   "x": 670,
+   "y": 470,
+   "w": 320,
+   "h": 100,
    "name": "Take out the stutter",
-   "n": 2,
-   "tools": "DeepSeek V4 Flash"
+   "n": 4,
+   "tools": "DeepSeek V4.1 Flash · code checks",
+   "what": [
+    "fillers, stutters, false starts",
+    "check fails: Haiku 5.5, then rules"
+   ]
   },
   {
-   "id": "x_ds",
+   "id": "x_tg2",
    "kind": "ext",
-   "x": 960,
-   "y": 416,
-   "w": 210,
-   "h": 64,
+   "x": 1040,
+   "y": 470,
+   "w": 240,
+   "h": 260,
    "name": "Together AI",
-   "what": "DeepSeek V4 Flash"
+   "what": [
+    "DeepSeek V4.1 Flash",
+    "DeepSeek V4 Flash"
+   ]
   },
   {
-   "id": "ok",
-   "kind": "decision",
-   "x": 500,
-   "y": 512,
-   "w": 180,
-   "h": 68,
-   "name": "checks\npass?"
-  },
-  {
-   "id": "retry",
+   "id": "fix",
    "kind": "step",
-   "x": 735,
-   "y": 516,
-   "w": 175,
-   "h": 60,
-   "name": "Try another model",
-   "tools": "Claude Haiku 5.5"
+   "x": 670,
+   "y": 612,
+   "w": 320,
+   "h": 118,
+   "name": "Fix misheard words, grammar",
+   "n": 5,
+   "tools": "DeepSeek V4.1 Flash · code checks",
+   "what": [
+    "grammar: on unless you turn it off",
+    "off: V4 Flash, misheard words only",
+    "check fails: Haiku 5.5, then keep"
+   ]
   },
   {
-   "id": "x_cl",
-   "kind": "ext",
-   "x": 960,
-   "y": 600,
-   "w": 210,
-   "h": 64,
-   "name": "Anthropic",
-   "what": "Claude Haiku 5.5"
-  },
-  {
-   "id": "rules",
-   "kind": "end",
-   "x": 800,
-   "y": 640,
-   "w": 110,
-   "h": 40,
-   "name": "rules",
-   "tone": "fail"
-  },
-  {
-   "id": "m_tidy",
+   "id": "m_final",
    "kind": "material",
-   "x": 540,
-   "y": 620,
+   "x": 425,
+   "y": 770,
    "w": 100,
    "h": 58,
-   "name": "own words, no ums",
+   "name": "your words, saved here",
    "icons": [
     "doc",
     "check"
@@ -165,19 +207,19 @@
   {
    "id": "read",
    "kind": "human",
-   "x": 70,
-   "y": 700,
-   "w": 250,
-   "h": 76,
-   "name": "Read it on Today",
-   "what": "no layout until you ask"
+   "x": 55,
+   "y": 766,
+   "w": 230,
+   "h": 80,
+   "name": "Read it, tap to edit",
+   "what": "kept on this phone"
   },
   {
    "id": "lay",
    "kind": "human",
-   "x": 70,
-   "y": 820,
-   "w": 250,
+   "x": 55,
+   "y": 900,
+   "w": 230,
    "h": 76,
    "name": "Tap Lay out",
    "what": "when you choose"
@@ -185,60 +227,65 @@
   {
    "id": "match",
    "kind": "step",
-   "x": 430,
-   "y": 820,
-   "w": 320,
-   "h": 76,
-   "name": "Match photos to sentences",
-   "n": 3,
-   "tools": "code · 一号是… · no. 1 is…"
+   "x": 330,
+   "y": 892,
+   "w": 290,
+   "h": 92,
+   "name": "Match photos to the words",
+   "n": 6,
+   "tools": "code · picture one · 照片一",
+   "what": "where a sentence or clause starts"
   },
   {
    "id": "tier",
    "kind": "decision",
-   "x": 500,
-   "y": 926,
-   "w": 180,
-   "h": 68,
+   "x": 395,
+   "y": 1026,
+   "w": 160,
+   "h": 64,
    "name": "premium?"
   },
   {
    "id": "free",
    "kind": "step",
-   "x": 370,
-   "y": 1040,
-   "w": 255,
-   "h": 76,
+   "x": 330,
+   "y": 1142,
+   "w": 290,
+   "h": 84,
    "name": "Lay out the page",
-   "n": 4,
-   "tools": "code, no model"
+   "n": 7,
+   "tools": "code: words flow around photos"
   },
   {
    "id": "dir",
    "kind": "step",
-   "x": 650,
-   "y": 1040,
-   "w": 260,
-   "h": 76,
+   "x": 670,
+   "y": 1136,
+   "w": 320,
+   "h": 96,
    "name": "Direct the layout",
-   "n": 5,
-   "tools": "Haiku 5.5 · code checks"
+   "n": 8,
+   "tools": "Claude Haiku 5.5 · code checks",
+   "what": "title, quote, hero photo"
   },
   {
-   "id": "x_cl2",
+   "id": "x_an2",
    "kind": "ext",
-   "x": 960,
-   "y": 1046,
-   "w": 210,
-   "h": 64,
+   "x": 1040,
+   "y": 1144,
+   "w": 240,
+   "h": 88,
    "name": "Anthropic",
-   "what": "title · quote · hero"
+   "what": [
+    "Claude Haiku 5.5, also the",
+    "fallback for 04 and 05"
+   ]
   },
   {
    "id": "m_page",
    "kind": "material",
-   "x": 540,
-   "y": 1150,
+   "x": 425,
+   "y": 1266,
    "w": 100,
    "h": 58,
    "name": "today's page",
@@ -250,34 +297,82 @@
   {
    "id": "drag",
    "kind": "human",
-   "x": 70,
-   "y": 1150,
-   "w": 250,
-   "h": 76,
-   "name": "Drag photos, talk again",
-   "what": "the words make room"
+   "x": 55,
+   "y": 1258,
+   "w": 230,
+   "h": 88,
+   "name": "Drag photos in, edit",
+   "what": [
+    "or talk again; the",
+    "words make room"
+   ]
   }
  ],
  "edges": [
   {
-   "to": "m_rec",
-   "style": "main",
+   "to": "live",
+   "style": "human",
    "from": "talk",
+   "fs": "r",
+   "ts": "l"
+  },
+  {
+   "to": "tlive",
+   "style": "main",
+   "from": "live",
+   "fs": "r",
+   "ts": "l"
+  },
+  {
+   "to": "x_tg",
+   "style": "data",
+   "from": "tlive",
+   "fs": "r",
+   "ts": "l"
+  },
+  {
+   "to": "live",
+   "style": "data",
+   "from": "tlive",
+   "fs": "b",
+   "ts": "b",
+   "pts": [
+    [
+     830,
+     256
+    ],
+    [
+     475,
+     256
+    ]
+   ],
+   "label": "words without the ums",
+   "lx": 560,
+   "ly": 274
+  },
+  {
+   "to": "m_wav",
+   "style": "human",
+   "from": "stop",
    "fs": "r",
    "ts": "l"
   },
   {
    "to": "stt",
    "style": "main",
-   "from": "m_rec"
+   "from": "m_wav",
+   "fs": "r",
+   "ts": "l",
+   "label": "WAV, 16 kHz",
+   "lx": 548,
+   "ly": 306
   },
   {
-   "to": "x_stt",
+   "to": "x_oa",
    "style": "data",
    "from": "stt",
    "fs": "r",
-   "ts": "l",
-   "label": "audio"
+   "ts": "l"
   },
   {
    "to": "m_raw",
@@ -290,73 +385,47 @@
    "from": "m_raw"
   },
   {
-   "to": "x_ds",
-   "style": "data",
-   "from": "tidy",
-   "fs": "r",
-   "ts": "l",
-   "label": "text"
-  },
-  {
-   "to": "ok",
+   "to": "fix",
    "style": "main",
    "from": "tidy"
   },
   {
-   "to": "retry",
-   "style": "retry",
-   "from": "ok",
+   "to": "x_tg2",
+   "style": "data",
+   "from": "tidy",
    "fs": "r",
    "ts": "l",
-   "label": "no"
+   "tdy": -80
   },
   {
-   "to": "x_cl",
+   "to": "x_tg2",
    "style": "data",
-   "from": "retry",
+   "from": "fix",
    "fs": "r",
-   "ts": "l"
+   "ts": "l",
+   "tdy": 71
   },
   {
-   "to": "rules",
-   "style": "fail",
-   "from": "retry",
-   "fs": "b",
-   "ts": "t",
-   "fdx": 32,
-   "label": "still no",
-   "lx": 870,
-   "ly": 604
-  },
-  {
-   "to": "m_tidy",
-   "style": "retry",
-   "from": "retry",
-   "fs": "b",
+   "to": "m_final",
+   "style": "main",
+   "from": "fix",
+   "fs": "l",
    "ts": "r",
-   "fdx": -55,
    "pts": [
     [
-     767,
-     649
+     600,
+     671
+    ],
+    [
+     600,
+     786
     ]
-   ],
-   "label": "pass",
-   "lx": 690,
-   "ly": 640
-  },
-  {
-   "to": "m_tidy",
-   "style": "main",
-   "from": "ok",
-   "label": "yes",
-   "lx": 600,
-   "ly": 616
+   ]
   },
   {
    "to": "read",
    "style": "human",
-   "from": "m_tidy",
+   "from": "m_final",
    "fs": "l",
    "ts": "r"
   },
@@ -381,11 +450,11 @@
    "to": "free",
    "style": "main",
    "from": "tier",
-   "fs": "l",
+   "fs": "b",
    "ts": "t",
    "label": "free",
-   "lx": 420,
-   "ly": 954
+   "lx": 484,
+   "ly": 1116
   },
   {
    "to": "dir",
@@ -394,15 +463,8 @@
    "fs": "r",
    "ts": "t",
    "label": "premium",
-   "lx": 700,
-   "ly": 954
-  },
-  {
-   "to": "x_cl2",
-   "style": "data",
-   "from": "dir",
-   "fs": "r",
-   "ts": "l"
+   "lx": 600,
+   "ly": 1048
   },
   {
    "to": "free",
@@ -411,25 +473,20 @@
    "fs": "l",
    "ts": "r",
    "label": "spec",
-   "lx": 628,
-   "ly": 1066
+   "lx": 636,
+   "ly": 1176
+  },
+  {
+   "to": "x_an2",
+   "style": "data",
+   "from": "dir",
+   "fs": "r",
+   "ts": "l"
   },
   {
    "to": "m_page",
    "style": "main",
-   "from": "free",
-   "fs": "b",
-   "ts": "t",
-   "pts": [
-    [
-     497,
-     1136
-    ],
-    [
-     590,
-     1136
-    ]
-   ]
+   "from": "free"
   },
   {
    "to": "drag",
@@ -446,17 +503,17 @@
    "ts": "l",
    "pts": [
     [
-     52,
-     1188
+     46,
+     1302
     ],
     [
-     52,
-     180
+     46,
+     186
     ]
    ],
    "label": "next recording",
-   "lx": 60,
-   "ly": 1110
+   "lx": 54,
+   "ly": 1230
   }
  ]
 }

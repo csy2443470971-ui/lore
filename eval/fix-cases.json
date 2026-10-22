@@ -1,0 +1,18 @@
+[
+  {"id": "en-recipe", "grammar": false, "in": "I finally tried my grandma's reply for dumplings and it came out pretty good.", "must": ["recipe"], "mustNot": ["reply"]},
+  {"id": "en-pier", "grammar": true, "in": "We spent the whole afternoon at the peer watching the boats come in.", "must": ["pier"], "mustNot": ["the peer"]},
+  {"id": "en-tense", "grammar": true, "in": "After the talk I grabbed food and just stand alone and eat it while everyone else was chatting.", "must": ["stood alone", "ate it"], "mustNot": ["stand alone and eat"]},
+  {"id": "en-tense-off", "grammar": false, "in": "After the talk I grabbed food and just stand alone and eat it while everyone else was chatting.", "unchanged": true},
+  {"id": "en-structure", "grammar": true, "in": "One speaker, Sean, talked about small business data in Harlem, and I did talk to him while I was finishing my eating.", "must": ["Sean", "small business data", "Harlem", "talk to him"]},
+  {"id": "en-clean", "grammar": true, "in": "We walked to the bridge right at sunset, and the whole lake turned orange-pink.", "unchanged": true},
+  {"id": "en-slang", "grammar": true, "in": "That show was lowkey fire ngl, we stayed up way too late.", "must": ["lowkey fire", "ngl", "way too late"]},
+  {"id": "en-names", "grammar": true, "in": "I had coffee with Shawn after the talk, then Kashish showed me her capstone.", "unchanged": true},
+  {"id": "en-hedge", "grammar": true, "in": "I guess it was kind of a weird day, but honestly kind of nice too.", "unchanged": true},
+  {"id": "zh-salt", "grammar": false, "in": "晚上回家煮了一碗面，结果放了太多延，咸死了。", "must": ["盐"], "mustNot": ["延"]},
+  {"id": "zh-price", "grammar": true, "in": "今天的油价又长了，加满一箱要四百多。", "must": ["涨"], "mustNot": ["又长了"]},
+  {"id": "zh-grammar", "grammar": true, "in": "因为下雨所以我们就没有去成公园了所以只好在家看电影。", "must": ["公园", "看电影"], "mustNot": ["公园了所以"]},
+  {"id": "zh-clean", "grammar": true, "in": "绝了绝了，这家店的桂花糖藕太好吃了，下次还来。", "unchanged": true},
+  {"id": "zh-dialect", "grammar": true, "in": "这事儿整得挺好的嘛，咱们明儿再接着唠。", "unchanged": true},
+  {"id": "mix-clean", "grammar": true, "in": "这个 presentation 我准备了很久，结果 boss 说 looks good 就完了。", "unchanged": true},
+  {"id": "mix-de", "grammar": true, "in": "下午跟 Kashish 在图书馆，我教她 vibe coding，她学的很快。", "must": ["Kashish", "vibe coding", "学得很快"], "mustNot": ["学的很快"]}
+]
