@@ -54,6 +54,8 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
   const [draft, setDraft] = useState('');
   const lift = useRef<{ u: Unit; moved: boolean; carried: boolean } | null>(null);   // a tray photo picked up by a long press
   const [ghost, setGhost] = useState<Pic[] | null>(null);
+  const [over, setOver] = useState<{ x: number; y: number } | null>(null);   // the carried photo over the page: the words already move for it
+  const box = useRef<{ x: number; y: number; w: number; h: number } | null>(null);   // the page's text area on screen, measured when a photo is lifted
   const ghostXY = useState(() => new Animated.ValueXY())[0];
   const g = solo(W - 2 * SZ.px);                                   // a dropped photo takes the size of a single photo on the page
 
@@ -176,9 +178,11 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
     ghostXY.setValue({ x: x - g.w / 2, y: y - g.h / 2 });
     setGhost(u.idx.map((i) => photos[i]));
     setDragging(true);
+    box.current = null;
+    area.current?.measureInWindow((ax, ay, aw, ah) => { box.current = { x: ax, y: ay, w: aw, h: ah }; });
     Haptics.selectionAsync().catch(() => {});
   }
-  function endLift() { lift.current = null; setGhost(null); setDragging(false); }
+  function endLift() { lift.current = null; setGhost(null); setOver(null); setDragging(false); }
   /* the finger came up while the tray still had it: no move means the menu; a move the page scroll took means nothing */
   function releasePhoto() {
     setTimeout(() => {
@@ -188,23 +192,30 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
       if (!l.moved) photoMenu(l.u);
     }, 0);
   }
-  /* dropped over the page: it goes where it was let go, and the words move out of its way */
-  function dropAt(x: number, y: number) {
-    const l = lift.current;
-    endLift();
-    if (!l || !area.current) return;
-    area.current.measureInWindow((ax, ay, aw, ah) => {
-      if (x < ax - 24 || x > ax + aw + 24 || y < ay - 24 || y > ay + ah + 80) return;
-      onPlace(l.u.idx, { x: Math.max(0, Math.min(aw - g.w, x - ax - g.w / 2)), y: Math.max(0, y - ay - g.h / 2) });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    });
+  /* where the carried photo would land on the page, in the page's own coordinates; null when the finger is off the page */
+  function onPageAt(x: number, y: number) {
+    const b = box.current;
+    if (!b || x < b.x - 24 || x > b.x + b.w + 24 || y < b.y - 24 || y > b.y + b.h + 80) return null;
+    return { x: Math.max(0, Math.min(b.w - g.w, x - b.x - g.w / 2)), y: Math.max(0, y - b.y - g.h / 2) };
   }
-  const handlers = useRef({ dropAt, endLift });
-  useEffect(() => { handlers.current = { dropAt, endLift }; });
+  /* dropped over the page: it stays where the words already made room for it */
+  function dropAt(x: number, y: number) {
+    const l = lift.current, at = onPageAt(x, y);
+    endLift();
+    if (!l || !at) return;
+    onPlace(l.u.idx, at);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }
+  function carryTo(x: number, y: number) {
+    ghostXY.setValue({ x: x - g.w / 2, y: y - g.h / 2 });
+    setOver(onPageAt(x, y));
+  }
+  const handlers = useRef({ dropAt, endLift, carryTo });
+  useEffect(() => { handlers.current = { dropAt, endLift, carryTo }; });
   const take = useCallback(() => { if (!lift.current) return false; lift.current.moved = true; return true; }, []);
   const hold = useCallback(() => { if (lift.current) lift.current.carried = true; }, []);
   const scrolled = useCallback(() => { if (lift.current) lift.current.moved = true; }, []);
-  const follow = useCallback((x: number, y: number) => ghostXY.setValue({ x: x - g.w / 2, y: y - g.h / 2 }), [ghostXY, g.w, g.h]);
+  const follow = useCallback((x: number, y: number) => handlers.current.carryTo(x, y), []);
   const letGo = useCallback((x: number, y: number) => handlers.current.dropAt(x, y), []);
   const putBack = useCallback(() => handlers.current.endLift(), []);
 
@@ -236,6 +247,7 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
+            preview={ghost && over ? { pics: ghost, ...over } : null}
             onDrag={setDragging} onMove={onMove} onEdit={edit} /> : null}
 
           {showTray ? (
@@ -321,7 +333,7 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
       </View>
 
       {ghost ? (
-        <Animated.View pointerEvents="none" style={[h.carry, { width: g.w, height: g.h, transform: ghostXY.getTranslateTransform() }]}>
+        <Animated.View pointerEvents="none" style={[h.carry, { width: g.w, height: g.h, opacity: over ? 0 : 0.94, transform: ghostXY.getTranslateTransform() }]}>
           {ghost.length > 1 ? <Mosaic pics={ghost} w={g.w} h={g.h} r={8} /> : <Image source={src(ghost[0])} contentFit="cover" style={{ width: g.w, height: g.h, borderRadius: 8 }} />}
         </Animated.View>
       ) : null}
