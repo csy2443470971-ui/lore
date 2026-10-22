@@ -6,7 +6,8 @@ export type Unit = { idx: number[] };            // one photo, or a group of pho
 export type Part = { unit: Unit; text: string; spoken?: string };
 /* audio: the recording the words came from, kept on the phone; at: when it started (ms); secs: how long it was;
    g: the words have had the grammar fix, or were edited by hand. A head is a time-of-day heading added at Lay out. */
-type Rec = { audio?: string; at?: number; secs?: number; g?: boolean };
+/* more: recordings joined into this paragraph from short ones after it */
+type Rec = { audio?: string; at?: number; secs?: number; g?: boolean; more?: { audio: string; at?: number; secs?: number }[] };
 export type Said = ({ kind: 'talk'; text: string } & Rec) | ({ kind: 'photos'; parts: Part[] } & Rec) | { kind: 'head'; text: string };
 /* placed: photos dragged from the tray onto the page; moved: where a photo on the page was dragged to, by its key */
 export type Placed = { id: string; idx: number[] };

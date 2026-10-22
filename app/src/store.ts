@@ -60,7 +60,8 @@ const seedOf = (asset: number) => Object.keys(PHOTO).find((k) => PHOTO[k] === as
 /* sample photos are saved by name, since the bundle's asset numbers change between updates */
 function pack(d: Day): string {
   const photos = d.photos.map((p) => (p.file ? { file: p.file } : p.asset !== undefined ? { seed: seedOf(p.asset) } : { uri: p.uri }));
-  const said = d.said.map((x) => (x.kind !== 'head' && x.audio ? { ...x, audio: inside(x.audio) ?? x.audio } : x));
+  const rel = (a: string) => inside(a) ?? a;
+  const said = d.said.map((x) => (x.kind === 'head' ? x : { ...x, audio: x.audio && rel(x.audio), more: x.more?.map((r) => ({ ...r, audio: rel(r.audio) })) }));
   return JSON.stringify({ photos, groups: d.groups, said, laid: d.laid, placed: d.placed, moved: d.moved });
 }
 function unpack(s: string): Day | null {

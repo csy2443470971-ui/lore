@@ -42,10 +42,11 @@ export async function fixText(text: string, grammar: boolean): Promise<string> {
 }
 
 /* the time-heading node: which of the day's sentences start a new time of day, and the heading for each */
-export async function sectionsOf(sentences: string[]): Promise<{ sentence: number; heading: string }[]> {
+export async function sectionsOf(sentences: string[]): Promise<{ sections: { sentence: number; heading: string }[]; breaks: number[] }> {
   const r = await fetch(`${URL}/sections`, { method: 'POST', headers: { 'x-lore-key': KEY, 'content-type': 'application/json' }, body: JSON.stringify({ sentences }) });
   if (!r.ok) throw new Error(String(r.status));
-  return (await r.json()).sections;
+  const j = await r.json();
+  return { sections: j.sections ?? [], breaks: j.breaks ?? [] };
 }
 
 /* the raw transcript, marked word by word: false where the tidy took it out (shown struck through for a moment) */
