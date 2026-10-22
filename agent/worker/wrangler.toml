@@ -10,3 +10,7 @@ compatibility_flags = ["nodejs_compat"]
 name = "LIMIT"
 namespace_id = "2611"
 simple = { limit = 20, period = 60 }
+
+# keep request logs, so a failed upload can be traced
+[observability]
+enabled = true
