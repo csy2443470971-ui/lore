@@ -5,11 +5,11 @@ main = "src/index.js"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# at most 20 requests a minute from one address
+# at most 90 requests a minute from one address (segments are tidied while the person talks)
 [[ratelimits]]
 name = "LIMIT"
 namespace_id = "2611"
-simple = { limit = 20, period = 60 }
+simple = { limit = 90, period = 60 }
 
 # keep request logs, so a failed upload can be traced
 [observability]
