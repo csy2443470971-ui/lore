@@ -14,7 +14,7 @@ import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, u
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ hidden, night, past, title, onTitle, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
+export function Home({ hidden, night, past, title, onTitle, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
   hidden: boolean; night: boolean;
   past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
   onTitle?: () => void;                              // the title opens the menu of days
@@ -23,6 +23,7 @@ export function Home({ hidden, night, past, title, onTitle, pageTitle, pageMeta,
   live: string;                                      // Apple's live words while recording, in the installed app
   grammar: boolean;                                  // "Fix grammar" in settings, sent with each recording
   voice: boolean;                                    // voice bars on the page, also a setting
+  indent: boolean;                                   // first-line indent, a setting
   onCamera: () => void; onPick: () => void;
   onOpen: (p: 'archive' | 'settings') => void;
   onRecord: { start: () => Promise<boolean>; stop: () => Promise<string | null>; cancel: () => Promise<string | null> };
@@ -250,7 +251,7 @@ export function Home({ hidden, night, past, title, onTitle, pageTitle, pageMeta,
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
-            preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice}
+            preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent}
             onDrag={setDragging} onMove={onMove} onEdit={edit} /> : null}
 
           {showTray ? (

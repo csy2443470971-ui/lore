@@ -58,6 +58,7 @@ export default function App() {
   const [lang, setLangState] = useState<Lang>('zh');
   const [grammar, setGrammarState] = useState(true);   // "Fix grammar": on unless the person turns it off
   const [voice, setVoiceState] = useState(true);       // voice bars at the top left of what was said
+  const [indent, setIndentState] = useState(false);    // first-line indent on the page
   const [pane, setPane] = useState<Pane>(null);
   const [today, setToday] = useState(() => dayKey());
   const [days, setDays] = useState<Record<string, Day>>(() => ({ [today]: { ...EMPTY, photos: SEED } }));
@@ -74,7 +75,8 @@ export default function App() {
   const via = useRef<'live' | 'audio'>('audio');      // which one is recording: Apple's recogniser, or expo-audio
 
   useEffect(() => {
-    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice']).then((kv) => {
+    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice', 'qd-indent']).then((kv) => {
+      if (kv[4][1] === '1') setIndentState(true);
       if (kv[2][1] === '0') setGrammarState(false);
       if (kv[3][1] === '0') setVoiceState(false);
       const m = kv[0][1]; if (m === 'light' || m === 'dark' || m === 'auto') setModeState(m);
@@ -85,6 +87,7 @@ export default function App() {
   const setLang = (l: Lang) => { setLangState(l); AsyncStorage.setItem('qd-lang', l).catch(() => {}); };
   const setGrammar = (g: boolean) => { setGrammarState(g); AsyncStorage.setItem('qd-grammar', g ? '1' : '0').catch(() => {}); };
   const setVoice = (v: boolean) => { setVoiceState(v); AsyncStorage.setItem('qd-voice', v ? '1' : '0').catch(() => {}); };
+  const setIndent = (v: boolean) => { setIndentState(v); AsyncStorage.setItem('qd-indent', v ? '1' : '0').catch(() => {}); };
 
   /* the days kept on the phone; the page waits for them, so nothing written first gets overwritten */
   useEffect(() => {
@@ -319,7 +322,7 @@ export default function App() {
             {fontsLoaded && ready && (
               <>
                 {cur === 'week' ? (
-                  <Week days={days} keys={weekKeys} title={S.navWeek} voice={voice} onTitle={() => setMenu(true)} onOpen={setPane} onDay={setCur}
+                  <Week days={days} keys={weekKeys} title={S.navWeek} voice={voice} indent={indent} onTitle={() => setMenu(true)} onOpen={setPane} onDay={setCur}
                     labelOf={(k) => `${dateTitle(k, lang).meta} · ${dateTitle(k, lang).title}`} />
                 ) : (
                 <Home key={cur} hidden={pane !== null} night={h >= 18 || h < 5}
@@ -327,7 +330,7 @@ export default function App() {
                   pageTitle={entry ? entry.t : dated.title} pageMeta={entry ? '' : dated.meta}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}
                   onRemove={(idx) => update(cur, (d) => removePhotos(d, idx))}
-                  said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} onCamera={shoot} onPick={pick} onOpen={setPane} onRecord={rec}
+                  said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} indent={indent} onCamera={shoot} onPick={pick} onOpen={setPane} onRecord={rec}
                   onSaved={(x) => update(cur, (d) => ({ ...d, said: [...d.said, x] }))} onLayout={layout} onNotice={setNotice}
                   placed={day.placed} moved={day.moved} onText={editText}
                   onPlace={(idx, at) => { const id = 'p' + Date.now().toString(36); update(cur, (d) => ({ ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } })); }}
@@ -336,7 +339,7 @@ export default function App() {
                 {menu ? <DayMenu opts={menuOpts} cur={cur} onPick={(k) => { setMenu(false); setCur(k); }} onClose={() => setMenu(false)} /> : null}
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
-                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} />
+                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} />
                 <Toast notice={notice} onClose={closeNotice} />
               </>
             )}

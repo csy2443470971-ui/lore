@@ -10,8 +10,8 @@ const still = () => {};
 
 /* This week, Monday to today: each day's page under its date, as it was laid out (and what was said after).
    A tap anywhere in a day opens that day on the writing page. */
-export function Week({ days, keys, labelOf, title, voice, onTitle, onOpen, onDay }: {
-  days: Record<string, Day>; keys: string[]; labelOf: (key: string) => string; title: string; voice: boolean;
+export function Week({ days, keys, labelOf, title, voice, indent, onTitle, onOpen, onDay }: {
+  days: Record<string, Day>; keys: string[]; labelOf: (key: string) => string; title: string; voice: boolean; indent: boolean;
   onTitle: () => void; onOpen: (p: 'archive' | 'settings') => void; onDay: (key: string) => void;
 }) {
   const t = useT();
@@ -33,7 +33,7 @@ export function Week({ days, keys, labelOf, title, voice, onTitle, onOpen, onDay
               </Pressable>
               {!has ? <Text style={[w.none, { color: t.mut, fontFamily: face.body }]}>{S.weekNone}</Text> : null}
               {has && d.laid > 0 ? (
-                <Page items={d.said.slice(0, d.laid)} photos={d.photos} placed={d.placed} moved={d.moved} voice={voice} title="" meta=""
+                <Page items={d.said.slice(0, d.laid)} photos={d.photos} placed={d.placed} moved={d.moved} voice={voice} indent={indent} title="" meta=""
                   onDrag={still} onMove={still} onEdit={() => onDay(k)} />
               ) : null}
               {has && d.said.length > d.laid ? <Stream items={d.said.slice(d.laid)} onEdit={() => onDay(k)} /> : null}

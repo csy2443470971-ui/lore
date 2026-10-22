@@ -71,7 +71,8 @@ function cuts(word: string): number[] {
 /* A photo belongs to one paragraph and covers whole lines, so it never runs into the next paragraph (which starts
    below it) and its edges sit PAD from the ink of the lines above and below, as they do from the words beside it. */
 /* heads: room kept above each paragraph for its time heading and voice bar; tops: where that room starts */
-function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number, heads: number[] = []) {
+/* indent: how far the first line of each paragraph starts in (0 when first-line indent is off) */
+function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number, heads: number[] = [], indent = 0) {
   const e = PAD - (lh - size) / 2;                // how far a photo's edge sits inside its first and last line
   const minSeg = size * 4;                        // a gap beside a photo narrower than this stays empty
   const lines: Line[] = [], starts: number[] = [], rows: number[] = [], tops: number[] = [];
@@ -99,9 +100,10 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
     let i = 0, ly = start;
     const first = lines.length;
     while (i < tk.length && ly < start + 5000 * lh) {
-      for (const [s, f] of free(ly)) {
+      for (const [s0, f] of free(ly)) {
         while (i < tk.length && /^\s+$/.test(tk[i])) i++;
         if (i >= tk.length) break;
+        const s = i === 0 ? s0 + indent : s0;
         let acc = 0;
         const from = i;
         while (i < tk.length) {
@@ -201,9 +203,10 @@ export const solo = (w: number) => cluster(1, w)[0];
    English lines up at both edges like Chinese. Drag any photo and the paragraphs reflow around it; where it ends up
    is kept. A photo carried in from the tray (preview) moves the words before it is let go. Tap a word to edit it. */
 type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
-export function Page({ items, photos, placed, moved, preview, voice, title, meta, area, onDrag, onMove, onEdit }: {
+export function Page({ items, photos, placed, moved, preview, voice, indent, title, meta, area, onDrag, onMove, onEdit }: {
   items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; preview?: { pics: Pic[]; x: number; y: number } | null;
   voice?: boolean;                                                // voice bars at the top left of what was said (a setting)
+  indent?: boolean;                                               // first-line indent (a setting)
   title: string; meta: string;
   area?: React.RefObject<View | null>;                           // the text area, for finding where a photo from the tray was dropped
   onDrag: (on: boolean) => void; onMove: (key: string, at: Pos) => void; onEdit: (item: number, part: number) => void;
@@ -212,9 +215,9 @@ export function Page({ items, photos, placed, moved, preview, voice, title, meta
   const face = useFace();
   const zh = useLang() === 'zh';
   const W = Dimensions.get('window').width - 2 * SZ.px;     // the page is today itself: no card, the full width
-  const size = zh ? 14 : 15, lh = zh ? 21 : 19.5, gap = 13;
+  const size = zh ? 14 : 15, lh = zh ? 21 : 19.5, gap = 17;
   const m = zh ? CN : SERIF;
-  const run = (spots: Spot[]) => flow(paras, spots, W, m, size, lh, gap, heads);
+  const run = (spots: Spot[]) => flow(paras, spots, W, m, size, lh, gap, heads, indent ? size * (zh ? 2 : 1.25) : 0);
 
   /* one paragraph per recording; a recording about photos brings its photos (a group counts as one tile) */
   const paras: string[] = [];
