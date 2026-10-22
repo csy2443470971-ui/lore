@@ -26,6 +26,8 @@ The app is an Expo / React Native prototype. The model pipeline runs on a Cloudf
 
    At Lay out, one call to DeepSeek V4 Flash also marks where the day moves to a new time ("下午", "after lunch"), and a small heading goes there in the speaker's own words; code checks that each heading appears in its sentence. Each stretch of talking keeps a voice bar at its top left; recordings stay in one bar while each starts within 20 minutes of the last one ending.
 
+   Paragraphs follow rules rather than recordings (`app/src/paragraphs.ts`): about 3 to 6 lines, 7 at most. A longer recording is cut between sentences, preferably where the speaker turns to a new subject (a second DeepSeek V4 Flash call marks those); one under 2 lines joins its neighbour when no heading or photo stands between them. A paragraph that can't join anything stays short.
+
    A laid-out day can be laid out again. Older words then get the misheard-word and grammar fix once, and are matched to photos again.
 
 ## Choosing the models
