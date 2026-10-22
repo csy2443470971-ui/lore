@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { CN, Metric, SERIF } from './metrics';
 import { Mosaic } from './Photos';
-import { Pic, Said } from './session';
+import { Pic, Placed, Pos, Said } from './session';
 import { SZ } from './theme';
 import { useFace, useLang, useS, useT } from './ui';
 
@@ -18,24 +18,24 @@ function useTx() {
 }
 
 /* Before layout: only the tidied words, in the order they were said. Photos aren't matched to sentences yet;
-   the spoken numbers ("one is…") stay in the text and are matched to photos at Lay out. */
-export function Stream({ items }: { items: Said[] }) {
+   the spoken numbers ("one is…") stay in the text and are matched to photos at Lay out. Tap a recording to edit it. */
+export function Stream({ items, onEdit }: { items: Said[]; onEdit?: (i: number) => void }) {
   const S = useS();
   const tx = useTx();
   return (
     <View style={{ gap: 16 }}>
-      {items.map((x, i) => (
-        <Text key={i} style={tx}>
+      {items.map((x, i) => (x.kind === 'talk' && !x.text ? null : (
+        <Text key={i} style={tx} onPress={onEdit && x.kind === 'talk' ? () => onEdit(i) : undefined}>
           {x.kind === 'talk' ? x.text : x.parts.map((p) => p.spoken ?? p.text).join(S.is === '是' ? '' : ' ')}
         </Text>
-      ))}
+      )))}
     </View>
   );
 }
 
 /* ---------- flowing text: lines are broken in JS around the photos' rectangles ---------- */
 type Rect = { x: number; y: number; w: number; h: number };
-type Line = { x: number; y: number; s: string };
+type Line = { x: number; y: number; s: string; p: number; o: number };   // p: paragraph, o: where in it the line starts
 
 const adv = (m: Metric, size: number, s: string) => {
   let w = 0;
@@ -44,6 +44,7 @@ const adv = (m: Metric, size: number, s: string) => {
 };
 /* Chinese breaks between any two characters, other scripts between words */
 const tokens = (s: string) => s.match(/[⺀-鿿豈-﫿　-〿＀-￯]|[^\s⺀-鿿豈-﫿　-〿＀-￯]+\s*|\s+/g) ?? [];
+const CJK = /[\u3400-\u9fff]/;
 const NO_START = /^[，。、！？；：）」』”’》,.!?;:)\]]/;
 
 function flow(paras: string[], rects: Rect[], width: number, m: Metric, size: number, lh: number, gap: number) {
@@ -60,8 +61,11 @@ function flow(paras: string[], rects: Rect[], width: number, m: Metric, size: nu
     }
     return segs.filter(([s, e]) => e - s >= minSeg);
   };
-  for (const p of paras) {
+  paras.forEach((p, pi) => {
     const tk = tokens(p);
+    const at: number[] = [];
+    let c = 0;
+    for (const t of tk) { at.push(c); c += t.length; }
     let i = 0;
     starts.push(y);
     while (i < tk.length) {
@@ -77,12 +81,12 @@ function flow(paras: string[], rects: Rect[], width: number, m: Metric, size: nu
           if (acc + w > e - s && i === from && e - s < width - 1) break;   // a word too long for a narrow gap: try the next gap
           acc += adv(m, size, tk[i]); i++;
         }
-        if (i > from) lines.push({ x: s, y, s: tk.slice(from, i).join('').trimEnd() });
+        if (i > from) lines.push({ x: s, y, s: tk.slice(from, i).join('').trimEnd(), p: pi, o: at[from] });
       }
       y += lh;
     }
     y += gap;
-  }
+  });
   const bottom = Math.max(y - gap, ...rects.map((r) => r.y + r.h));
   return { lines, starts, height: bottom };
 }
@@ -130,31 +134,60 @@ function cluster(n: number, w: number): Rect[] {
   return [0, 1, 2, 3].map((i) => ({ x: (i % 2) * (a + G), y: Math.floor(i / 2) * (a + G), w: a, h: a }));
 }
 
+/* a photo dragged onto the page from the tray is the size of a single photo */
+export const solo = (w: number) => cluster(1, w)[0];
+
 /* After Lay out: the words and photos set as a page, dense like a printed page. The photos from one
-   recording sit together beside its paragraph; drag any photo and the paragraphs reflow around it. */
-export function Page({ items, photos, title, meta, onDrag }: { items: Said[]; photos: Pic[]; title: string; meta: string; onDrag: (on: boolean) => void }) {
+   recording sit together beside its paragraph; photos dragged in from the tray sit where they were dropped.
+   Drag any photo and the paragraphs reflow around it; where it ends up is kept. Tap a line to edit it. */
+type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
+export function Page({ items, photos, placed, moved, title, meta, area, onDrag, onMove, onEdit }: {
+  items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; title: string; meta: string;
+  area?: React.RefObject<View | null>;                           // the text area, for finding where a photo from the tray was dropped
+  onDrag: (on: boolean) => void; onMove: (key: string, at: Pos) => void; onEdit: (item: number, part: number) => void;
+}) {
   const t = useT();
   const face = useFace();
   const zh = useLang() === 'zh';
   const W = Dimensions.get('window').width - 2 * SZ.px;     // the page is today itself: no card, the full width
-  const size = zh ? 14 : 15, lh = zh ? 22 : 20.5, gap = 7;
+  const size = zh ? 14 : 15, lh = zh ? 22 : 20.5, gap = 12;
   const m = zh ? CN : SERIF;
 
   /* one paragraph per recording; a recording about photos brings its photos (a group counts as one tile) */
   const paras: string[] = [];
+  const srcs: Src[][] = [];
   const sets: { para: number; tiles: { key: string; pics: Pic[] }[] }[] = [];
   items.forEach((x, i) => {
-    if (x.kind === 'talk') { paras.push(x.text); return; }
+    if (x.kind === 'talk') { if (x.text) { paras.push(x.text); srcs.push([{ item: i, part: -1, from: 0 }]); } return; }
     const tiles = x.parts.map((p, j) => ({ key: `${i}-${j}`, pics: p.unit.idx.map((k) => photos[k]).filter(Boolean) })).filter((tl) => tl.pics.length);
     for (let c = 0; c < tiles.length; c += 4) sets.push({ para: paras.length, tiles: tiles.slice(c, c + 4) });
-    paras.push(x.parts.map((p) => p.text).join(zh ? '' : ' '));
+    let text = '';                                  // captions join with a space, except next to Chinese
+    srcs.push(x.parts.map((p, j) => {
+      if (text && p.text && !CJK.test(text.slice(-1) + p.text[0])) text += ' ';
+      const at = { item: i, part: j, from: text.length };
+      text += p.text;
+      return at;
+    }));
+    paras.push(text);
   });
+  /* a tap on a line edits the words under the finger: their recording, or the caption of the photo they belong to */
+  const tapAt = (l: Line, x: number) => {
+    let o = l.o, w = 0;
+    for (const ch of l.s) { const a = adv(m, size, ch); if (w + a / 2 > x) break; w += a; o += ch.length; }
+    const sr = srcs[l.p].reduce((r, c) => (c.from <= o ? c : r), srcs[l.p][0]);
+    onEdit(sr.item, sr.part);
+  };
 
-  /* where each photo starts: each set beside the start of its paragraph (or under the set before it),
-     sets alternating right and left; a photo that has been dragged stays where it was put */
-  const [moved, setMoved] = useState<Record<string, { x: number; y: number }>>({});
+  /* where each photo is: where it was dragged to, or else each set beside the start of its paragraph (or under
+     the set before it), sets alternating right and left */
+  const [live, setLive] = useState<Record<string, Pos>>({});      // positions changed since this page was opened
+  const pos = { ...moved, ...live };
   const [front, setFront] = useState('');           // the photo picked up last sits above the others
   const tiles: { key: string; pics: Pic[]; r: Rect }[] = [];
+  for (const pl of placed ?? []) {
+    const pics = pl.idx.map((k) => photos[k]).filter(Boolean);
+    if (pics.length) tiles.push({ key: pl.id, pics, r: { ...solo(W), ...(pos[pl.id] ?? { x: 0, y: 0 }) } });
+  }
   let prevPara = -1, prevBottom = 0;
   sets.forEach((st, n) => {
     const shape = cluster(st.tiles.length, W);
@@ -164,7 +197,7 @@ export function Page({ items, photos, title, meta, onDrag }: { items: Said[]; ph
     const y0 = st.para === prevPara ? prevBottom + G * 2 : at + 3;
     const x0 = n % 2 ? 0 : W - cw;
     st.tiles.forEach((tl, i) => {
-      const at2 = moved[tl.key];
+      const at2 = pos[tl.key];
       tiles.push({ key: tl.key, pics: tl.pics, r: at2 ? { ...shape[i], x: at2.x, y: at2.y } : { ...shape[i], x: x0 + shape[i].x, y: y0 + shape[i].y } });
     });
     prevPara = st.para; prevBottom = y0 + ch;
@@ -172,27 +205,36 @@ export function Page({ items, photos, title, meta, onDrag }: { items: Said[]; ph
   const { lines, height } = flow(paras, tiles.map((tl) => tl.r), W, m, size, lh, gap);
 
   /* where each photo was when the finger went down; read only inside the gesture handlers */
-  const placed = useRef<Record<string, Rect>>({});
+  const rects = useRef<Record<string, Rect>>({});
   const origin = useRef({ x: 0, y: 0 });
-  useEffect(() => { placed.current = Object.fromEntries(tiles.map((tl) => [tl.key, tl.r])); });
+  const last = useRef<{ id: string; at: Pos } | null>(null);
+  const moveTo = useRef(onMove);
+  useEffect(() => { rects.current = Object.fromEntries(tiles.map((tl) => [tl.key, tl.r])); moveTo.current = onMove; });
   const grab = useCallback((id: string) => {
-    const r = placed.current[id]; if (r) origin.current = { x: r.x, y: r.y };
+    const r = rects.current[id]; if (r) origin.current = { x: r.x, y: r.y };
     setFront(id); onDrag(true);
   }, [onDrag]);
   const drag = useCallback((id: string, dx: number, dy: number) => {
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
-    const w = placed.current[id]?.w ?? 0;
-    setMoved((s) => ({ ...s, [id]: { x: Math.max(0, Math.min(W - w, origin.current.x + dx)), y: Math.max(0, origin.current.y + dy) } }));
+    const w = rects.current[id]?.w ?? 0;
+    const at = { x: Math.max(0, Math.min(W - w, origin.current.x + dx)), y: Math.max(0, origin.current.y + dy) };
+    last.current = { id, at };
+    setLive((s) => ({ ...s, [id]: at }));
   }, [W]);
-  const drop = useCallback(() => onDrag(false), [onDrag]);
+  const drop = useCallback(() => {
+    if (last.current) moveTo.current(last.current.id, last.current.at);
+    last.current = null;
+    onDrag(false);
+  }, [onDrag]);
 
   return (
     <View style={d.page}>
       <Text style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text>
       {meta ? <Text style={[d.meta, { color: t.mut }]}>{meta}</Text> : null}
-      <View style={{ height, marginTop: 12 }}>
+      <View ref={area} collapsable={false} style={{ height, marginTop: 12 }}>
         {lines.map((l, i) => (
-          <Text key={i} numberOfLines={1} style={{ position: 'absolute', left: l.x, top: l.y, fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body }}>{l.s}</Text>
+          <Text key={i} numberOfLines={1} onPress={(e) => tapAt(l, e.nativeEvent.locationX)}
+            style={{ position: 'absolute', left: l.x, top: l.y, fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body }}>{l.s}</Text>
         ))}
         {tiles.map((tl) => (
           <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} grab={grab} drag={drag} drop={drop}>

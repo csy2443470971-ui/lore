@@ -1,10 +1,15 @@
 /* What happened in a day: photos picked, groups made, and what was said. */
-export type Pic = { uri?: string; asset?: number };
+/* file: the photo's path inside Documents, once it has been copied out of the picker's cache */
+export type Pic = { uri?: string; asset?: number; file?: string };
 export type Unit = { idx: number[] };            // one photo, or a group of photos (indices into the picked list)
 /* spoken: the sentence as said ("one is the café…"); text: the same words without the number, used as the caption */
 export type Part = { unit: Unit; text: string; spoken?: string };
-export type Said = { kind: 'talk'; text: string } | { kind: 'photos'; parts: Part[] };
-export type Day = { photos: Pic[]; groups: number[][]; said: Said[]; laid: number };
+/* audio: the recording the words came from, kept on the phone */
+export type Said = { kind: 'talk'; text: string; audio?: string } | { kind: 'photos'; parts: Part[] };
+/* placed: photos dragged from the tray onto the page; moved: where a photo on the page was dragged to, by its key */
+export type Placed = { id: string; idx: number[] };
+export type Pos = { x: number; y: number };
+export type Day = { photos: Pic[]; groups: number[][]; said: Said[]; laid: number; placed?: Placed[]; moved?: Record<string, Pos> };
 
 /* photos in order, with each group standing where its first photo was */
 export function unitsOf(count: number, groups: number[][]): Unit[] {
@@ -32,5 +37,6 @@ export function removePhotos(d: Day, gone: number[]): Day {
     photos: d.photos.filter((_, i) => !drop.has(i)),
     groups: d.groups.map(re).filter((g) => g.length > 1),
     said: d.said.map((x) => (x.kind === 'photos' ? { ...x, parts: x.parts.map((p) => ({ ...p, unit: { idx: re(p.unit.idx) } })) } : x)),
+    placed: d.placed?.map((p) => ({ ...p, idx: re(p.idx) })).filter((p) => p.idx.length),
   };
 }

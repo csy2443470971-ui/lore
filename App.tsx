@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Platform, StyleSheet, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -12,6 +12,8 @@ import { Lang, STR } from './src/data';
 import { PHOTO } from './src/images';
 import { Day, removePhotos, Said } from './src/session';
 import { match } from './src/match';
+import { dayKey, isDayKey, keepPhoto, loadDays, saveDay } from './src/store';
+import { useLive } from './src/live';
 import { dark as darkT, light as lightT } from './src/theme';
 import { DotField, LangCtx, Notice, ThemeCtx, Toast } from './src/ui';
 import { Home } from './src/Home';
@@ -24,6 +26,15 @@ const EMPTY: Day = { photos: [], groups: [], said: [], laid: 0 };
 const SEED = Platform.OS === 'web' && typeof location !== 'undefined' && location.search.includes('seed=photos')
   ? ['cafe', 'latte', 'sunset', 'osmanthus', 'noodles', 'hotpot'].map((k) => ({ asset: PHOTO[k] })) : [];
 
+/* a day's page is titled by its date until it has a title of its own; the weekday goes underneath */
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function dateTitle(key: string, lang: Lang) {
+  const [y, m, d] = key.split('-').map(Number);
+  const w = new Date(y, m - 1, d).getDay();
+  return lang === 'zh' ? { title: `${m}月${d}日`, meta: `周${'日一二三四五六'[w]}` } : { title: `${MONTHS[m - 1]} ${d}`, meta: DAYS[w] };
+}
+
 /* One writing page for every day. Today starts empty; a day from Look back opens on the same page,
    already laid out, and you can keep talking into it. Look back and settings slide over it. */
 export default function App() {
@@ -35,23 +46,56 @@ export default function App() {
   const system = useColorScheme();
   const [mode, setModeState] = useState<Mode>('auto');
   const [lang, setLangState] = useState<Lang>('zh');
+  const [grammar, setGrammarState] = useState(true);   // "Fix grammar": on unless the person turns it off
   const [pane, setPane] = useState<Pane>(null);
-  const [days, setDays] = useState<Record<string, Day>>({ today: { ...EMPTY, photos: SEED } });
-  const [cur, setCur] = useState('today');           // 'today', or 'e<n>' for an entry from Look back
+  const [today] = useState(() => dayKey());
+  const [days, setDays] = useState<Record<string, Day>>(() => ({ [today]: { ...EMPTY, photos: SEED } }));
+  const [cur, setCur] = useState(today);             // a date, or 'e<n>' for a sample entry from Look back
+  const [ready, setReady] = useState(false);
+  const saved = useRef<Record<string, Day>>({});
   const [making, setMaking] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const closeNotice = useCallback(() => setNotice(null), []);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const S = STR[lang];
+  const live = useLive((code) => setNotice({ text: `${S.liveStopped} (${code})` }));
+  const via = useRef<'live' | 'audio'>('audio');      // which one is recording: Apple's recogniser, or expo-audio
 
   useEffect(() => {
-    AsyncStorage.multiGet(['qd-mode', 'qd-lang']).then((kv) => {
+    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar']).then((kv) => {
+      if (kv[2][1] === '0') setGrammarState(false);
       const m = kv[0][1]; if (m === 'light' || m === 'dark' || m === 'auto') setModeState(m);
       const l = kv[1][1]; if (l === 'zh' || l === 'en') setLangState(l);
     }).catch(() => {});
   }, []);
   const setMode = (m: Mode) => { setModeState(m); AsyncStorage.setItem('qd-mode', m).catch(() => {}); };
   const setLang = (l: Lang) => { setLangState(l); AsyncStorage.setItem('qd-lang', l).catch(() => {}); };
+  const setGrammar = (g: boolean) => { setGrammarState(g); AsyncStorage.setItem('qd-grammar', g ? '1' : '0').catch(() => {}); };
+
+  /* the days kept on the phone; the page waits for them, so nothing written first gets overwritten */
+  useEffect(() => {
+    let live = true;
+    loadDays().catch(() => ({} as Record<string, Day>)).then((m) => {
+      if (!live) return;
+      saved.current = m;
+      setDays((c) => ({ ...c, ...m }));
+      setReady(true);
+    });
+    return () => { live = false; };
+  }, []);
+  /* a day is saved a moment after it changes; the sample entries from Look back never are */
+  useEffect(() => {
+    if (!ready) return;
+    const id = setTimeout(() => {
+      for (const [k, d] of Object.entries(days)) {
+        if (!isDayKey(k) || saved.current[k] === d) continue;
+        if (!saved.current[k] && !d.photos.length && !d.said.length) continue;   // a blank day that was never saved
+        saved.current[k] = d;
+        saveDay(k, d).catch(() => {});
+      }
+    }, 300);
+    return () => clearTimeout(id);
+  }, [days, ready]);
 
   const day = days[cur] ?? EMPTY;
   const update = (key: string, f: (d: Day) => Day) => setDays((m) => ({ ...m, [key]: f(m[key] ?? EMPTY) }));
@@ -65,7 +109,7 @@ export default function App() {
       setDays((m) => ({ ...m, [key]: { photos: e.p.map((k) => ({ asset: PHOTO[k] })), groups: [], said, laid: said.length } }));
       tipDrag({ photos: [], groups: [], said, laid: said.length }, said.length);
     }
-    setCur(e?.today ? 'today' : key);
+    setCur(e?.today ? today : key);
     setPane(null);
   }
 
@@ -74,7 +118,8 @@ export default function App() {
     try {
       const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, orderedSelection: true, selectionLimit: 60, quality: 0.7 });
       if (r.canceled || !r.assets.length) return;
-      update(key, (d) => ({ ...d, photos: [...d.photos, ...r.assets.map((a) => ({ uri: a.uri }))] }));
+      const kept = await Promise.all(r.assets.map((a) => keepPhoto(a.uri)));
+      update(key, (d) => ({ ...d, photos: [...d.photos, ...kept] }));
       Haptics.selectionAsync().catch(() => {});
     } catch { /* picker unavailable */ }
   }
@@ -85,7 +130,8 @@ export default function App() {
       if (!perm.granted) { setNotice({ text: S.cameraDenied, action: settings }); return; }
       const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 });
       if (r.canceled || !r.assets.length) return;
-      update(key, (d) => ({ ...d, photos: [...d.photos, { uri: r.assets[0].uri }] }));
+      const kept = await keepPhoto(r.assets[0].uri);
+      update(key, (d) => ({ ...d, photos: [...d.photos, kept] }));
     } catch { /* no camera, e.g. the simulator */ }
   }
 
@@ -97,6 +143,15 @@ export default function App() {
       setNotice({ text: S.dragHint });
       AsyncStorage.setItem('qd-tip-drag', '1').catch(() => {});
     }).catch(() => {});
+  }
+
+  /* an edited recording, or an edited caption of one photo; emptied words stay as an empty entry, so nothing else moves */
+  function editText(item: number, part: number, text: string) {
+    update(cur, (d) => ({
+      ...d,
+      said: d.said.map((x, i) => (i !== item ? x : x.kind === 'talk' ? { ...x, text }
+        : { ...x, parts: x.parts.map((p, j) => (j === part ? { ...p, text, spoken: undefined } : p)) })),
+    }));
   }
 
   /* laying out is a step the person chooses; it takes everything said so far */
@@ -111,12 +166,17 @@ export default function App() {
     });
     const n = said.length;
     setMaking(true);
-    setTimeout(() => { update(key, (d) => ({ ...d, said, laid: n })); tipDrag({ ...day, said }, n); setMaking(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }, 2000);
+    /* a photo now talked about leaves the spot it was dropped on and goes beside its words */
+    const talkedOf = new Set(said.flatMap((x) => (x.kind === 'photos' ? x.parts.flatMap((p) => p.unit.idx) : [])));
+    setTimeout(() => { update(key, (d) => ({ ...d, said, laid: n, placed: d.placed?.filter((p) => !p.idx.some((i) => talkedOf.has(i))) })); tipDrag({ ...day, said }, n); setMaking(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }, 2000);
   }
 
-  /* the microphone: on the phone its recording goes to Lore's backend; the web preview shows a demo transcript */
+  /* the microphone: on the phone its recording goes to Lore's backend; the web preview shows a demo transcript.
+     In the installed app, Apple's recogniser records and shows the words live; in Expo Go, expo-audio records. */
   const rec = {
     start: async () => {
+      if (live.on && await live.start(lang)) { via.current = 'live'; return true; }
+      via.current = 'audio';
       try {
         const p = await requestRecordingPermissionsAsync();
         if (!p.granted) { setNotice({ text: S.micDenied, action: settings }); return false; }
@@ -129,11 +189,13 @@ export default function App() {
     /* both hand back the recorded file, so it can be sent, or brought back with Undo */
     stop: async () => {
       let uri: string | null = null;
-      try { if (recorder.isRecording) { await recorder.stop(); uri = recorder.uri; await setAudioModeAsync({ allowsRecording: false }); } } catch { /* ignore */ }
+      if (via.current === 'live') uri = await live.stop();
+      else try { if (recorder.isRecording) { await recorder.stop(); uri = recorder.uri; await setAudioModeAsync({ allowsRecording: false }); } } catch { /* ignore */ }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       return uri;
     },
     cancel: async () => {
+      if (via.current === 'live') return live.stop();
       let uri: string | null = null;
       try { if (recorder.isRecording) { await recorder.stop(); uri = recorder.uri; await setAudioModeAsync({ allowsRecording: false }); } } catch { /* ignore */ }
       return uri;
@@ -143,7 +205,8 @@ export default function App() {
   const isDark = mode === 'auto' ? system === 'dark' : mode === 'dark';
   const t = isDark ? darkT : lightT;
   const h = new Date().getHours();
-  const entry = cur === 'today' ? null : S.entries[Number(cur.slice(1))];
+  const entry = isDayKey(cur) ? null : S.entries[Number(cur.slice(1))];
+  const dated = dateTitle(isDayKey(cur) ? cur : today, lang);
 
   return (
     <SafeAreaProvider>
@@ -152,18 +215,21 @@ export default function App() {
           <View style={[styles.root, { backgroundColor: t.b }]}>
             <StatusBar style={isDark ? 'light' : 'dark'} />
             <DotField />
-            {fontsLoaded && (
+            {fontsLoaded && ready && (
               <>
                 <Home key={cur} hidden={pane !== null} night={h >= 18 || h < 5}
-                  past={!!entry} title={entry ? entry.when : S.navToday} onToday={() => setCur('today')}
-                  pageTitle={entry ? entry.t : S.todayTitle} pageMeta={entry ? '' : S.date}
+                  past={!!entry} title={entry ? entry.when : S.navToday} onToday={() => setCur(today)}
+                  pageTitle={entry ? entry.t : dated.title} pageMeta={entry ? '' : dated.meta}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}
                   onRemove={(idx) => update(cur, (d) => removePhotos(d, idx))}
-                  said={day.said} laid={day.laid} making={making} onCamera={shoot} onPick={pick} onOpen={setPane} onRecord={rec}
-                  onSaved={(x) => update(cur, (d) => ({ ...d, said: [...d.said, x] }))} onLayout={layout} onNotice={setNotice} />
+                  said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} onCamera={shoot} onPick={pick} onOpen={setPane} onRecord={rec}
+                  onSaved={(x) => update(cur, (d) => ({ ...d, said: [...d.said, x] }))} onLayout={layout} onNotice={setNotice}
+                  placed={day.placed} moved={day.moved} onText={editText}
+                  onPlace={(idx, at) => { const id = 'p' + Date.now().toString(36); update(cur, (d) => ({ ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } })); }}
+                  onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))} />
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
-                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} />
+                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} />
                 <Toast notice={notice} onClose={closeNotice} />
               </>
             )}

@@ -12,7 +12,8 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "按住红点说话时，用麦克风录下你的声音。"
       },
-      "runtimeVersion": "exposdk:57.0.0"
+      "runtimeVersion": "exposdk:57.0.0",
+      "appleTeamId": "N9M5D75C74"
     },
     "android": {
       "adaptiveIcon": {
@@ -54,7 +55,23 @@
           "photosPermission": "选照片放进今天的日记。",
           "cameraPermission": "拍一张照片放进今天的日记。"
         }
-      ]
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "按住红点说话时，用麦克风录下你的声音。",
+          "speechRecognitionPermission": "说话时，用 Apple 的语音识别把你说的话实时显示出来。"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "17.0"
+          }
+        }
+      ],
+      "./plugins/with-quoted-bundle-script"
     ],
     "extra": {
       "eas": {
@@ -63,7 +80,10 @@
     },
     "owner": "siennachen",
     "updates": {
-      "url": "https://u.expo.dev/559a7d77-59e4-4b1c-89fc-eeaf9ca4c885"
+      "url": "https://u.expo.dev/559a7d77-59e4-4b1c-89fc-eeaf9ca4c885",
+      "requestHeaders": {
+        "expo-channel-name": "main"
+      }
     }
   }
 }
