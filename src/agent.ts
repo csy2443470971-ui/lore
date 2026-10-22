@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { File } from 'expo-file-system';
 
 /* Lore's backend (agent/worker). The address and the app key come from mobile/.env, which is not in git. */
 const URL = process.env.EXPO_PUBLIC_LORE_AGENT_URL;
@@ -9,12 +10,19 @@ export const agentOn = Platform.OS !== 'web' && !!URL && !!KEY;
 
 export type Heard = { raw: string; text: string; via: string };
 
-/* send one recording: it comes back as the raw transcript and the tidied text */
+/* send one recording: it comes back as the raw transcript and the tidied text.
+   The audio travels as base64 in JSON: the multipart file convention ({ uri, name, type }) is not understood by every fetch. */
 export async function transcribe(uri: string): Promise<Heard> {
-  const fd = new FormData();
-  fd.append('audio', { uri, name: 'entry.m4a', type: 'audio/mp4' } as unknown as Blob);
-  const r = await fetch(`${URL}/transcribe`, { method: 'POST', headers: { 'x-lore-key': KEY }, body: fd });
-  if (!r.ok) throw new Error(`lore ${r.status}`);
+  const audio = await new File(uri).base64();
+  const r = await fetch(`${URL}/transcribe`, {
+    method: 'POST',
+    headers: { 'x-lore-key': KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ audio, mime: 'audio/mp4' }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(`${r.status}${j.error ? ' ' + j.error : ''}`);
+  }
   return r.json();
 }
 

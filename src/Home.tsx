@@ -63,9 +63,9 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
       if (!r.text.trim()) { setReal('idle'); onNotice({ text: S.heardNothing }); return; }
       setHeard(r); setReal('show');
       setTimeout(() => { onSaved({ kind: 'talk', text: r.text }); setReal('idle'); setHeard(null); }, 1500);
-    }).catch(() => {
+    }).catch((e: unknown) => {
       setReal('idle');
-      onNotice({ text: S.notReached, action: { label: S.retry, run: () => send(uri) } });
+      onNotice({ text: `${S.notReached} (${String(e instanceof Error ? e.message : e).slice(0, 40)})`, action: { label: S.retry, run: () => send(uri) } });
     });
   }
   function start() {
