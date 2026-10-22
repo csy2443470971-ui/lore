@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Linking, Platform, StyleSheet, useColorScheme, View } from 'react-native';
+import { ActionSheetIOS, Alert, AppState, Linking, Platform, StyleSheet, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as Haptics from 'expo-haptics';
@@ -11,12 +11,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Newsreader_300Light, Newsreader_400Regular, Newsreader_400Regular_Italic } from '@expo-google-fonts/newsreader';
 import { Lang, STR } from './src/data';
 import { PHOTO } from './src/images';
-import { Day, removePhotos, Said } from './src/session';
+import { Day, removePhotos, Said, Sticker } from './src/session';
 import { match, sentences } from './src/match';
 import { timeRules } from './src/sections';
 import { join, shape } from './src/paragraphs';
-import { agentOn, fixText, sectionsOf } from './src/agent';
-import { dayKey, isDayKey, keepPhoto, loadDays, saveDay } from './src/store';
+import { agentOn, fixText, readPage, sectionsOf } from './src/agent';
+import { dayKey, isDayKey, isSpanKey, keepPhoto, loadDays, loadMine, relative, saveDay, saveMine } from './src/store';
+import LoreVision from './modules/lore-vision';
 import { useLive } from './src/live';
 import { dark as darkT, light as lightT } from './src/theme';
 import { DotField, LangCtx, Notice, ThemeCtx, Toast } from './src/ui';
@@ -24,6 +25,7 @@ import { Home } from './src/Home';
 import { Archive, Insights, Settings } from './src/Screens';
 import { DayMenu } from './src/DayMenu';
 import { Week } from './src/Week';
+import { RangePicker } from './src/Range';
 
 type Mode = 'light' | 'dark' | 'auto';
 type Pane = null | 'archive' | 'insights' | 'settings';
@@ -46,6 +48,34 @@ function dateTitle(key: string, lang: Lang) {
   return lang === 'zh' ? { title: `${m}月${d}日`, meta: `周${'日一二三四五六'[w]}` } : { title: `${MONTHS[m - 1]} ${d}`, meta: DAYS[w] };
 }
 
+/* each day inside a page written over several days, and that page's key */
+function spanLinks(days: Record<string, Day>) {
+  const out: Record<string, string> = {};
+  for (const [k, d] of Object.entries(days)) {
+    if (!isSpanKey(k) || !d.span || (!d.said.length && !d.photos.length)) continue;
+    for (let x = d.span.from; x <= d.span.to; x = shift(x, 1)) out[x] = k;
+  }
+  return out;
+}
+/* how many paragraphs a page's items make (a sticker is tied to a paragraph by its number) */
+const paraCount = (said: Said[]) => said.filter((x) => (x.kind === 'talk' && !!x.text) || x.kind === 'photos').length;
+/* one day's things after another's: photo numbers, groups, placed photos, where photos were dragged, and stickers move along */
+function append(dst: Day, src: Day): Day {
+  const off = dst.photos.length, n = dst.said.length, pn = paraCount(dst.said);
+  const re = (idx: number[]) => idx.map((i) => i + off);
+  const said = src.said.map((x): Said => (x.kind === 'photos' ? { ...x, parts: x.parts.map((p) => ({ ...p, unit: { idx: re(p.unit.idx) } })) } : x));
+  const moved = Object.fromEntries(Object.entries(src.moved ?? {}).map(([k, v]) => [/^\d+-\d+$/.test(k) ? k.replace(/^\d+/, (i) => String(Number(i) + n)) : k, v]));
+  const allLaid = dst.laid === dst.said.length;
+  return {
+    ...dst,
+    photos: [...dst.photos, ...src.photos], groups: [...dst.groups, ...src.groups.map(re)], said: [...dst.said, ...said],
+    laid: allLaid ? n + src.laid : dst.laid,
+    placed: [...(dst.placed ?? []), ...(src.placed ?? []).map((p) => ({ ...p, idx: re(p.idx) }))],
+    moved: { ...dst.moved, ...moved },
+    stickers: [...(dst.stickers ?? []), ...(src.stickers ?? []).map((st) => ({ ...st, p: st.p < 0 ? st.p : st.p + pn }))],
+  };
+}
+
 /* One writing page for every day. Today starts empty; a day from Look back opens on the same page,
    already laid out, and you can keep talking into it. Look back and settings slide over it. */
 export default function App() {
@@ -63,7 +93,13 @@ export default function App() {
   const [pane, setPane] = useState<Pane>(null);
   const [today, setToday] = useState(() => dayKey());
   const [days, setDays] = useState<Record<string, Day>>(() => ({ [today]: { ...EMPTY, photos: SEED } }));
-  const [cur, setCur] = useState(today);             // a date, 'week' for this week, or 'e<n>' for a sample entry from Look back
+  const [curKey, setCur] = useState(today);          // a date, 'week' for this week, or 'e<n>' for a sample entry from Look back
+  /* a day inside a page written over several days opens that page */
+  const links = spanLinks(days);
+  const cur = links[curKey] ?? curKey;
+  const [ranging, setRanging] = useState(false);      // choosing days to write as one page
+  const [mine, setMine] = useState<string[]>([]);      // stickers made from photos
+  const [slap, setSlap] = useState('');                // the sticker just put on the page
   const [menu, setMenu] = useState(false);
   const [picking, setPicking] = useState(false);       // choosing which day the page belongs to
   const [ready, setReady] = useState(false);
@@ -92,6 +128,7 @@ export default function App() {
   const setIndent = (v: boolean) => { setIndentState(v); AsyncStorage.setItem('qd-indent', v ? '1' : '0').catch(() => {}); };
 
   /* the days kept on the phone; the page waits for them, so nothing written first gets overwritten */
+  useEffect(() => { loadMine().then(setMine); }, []);
   useEffect(() => {
     let live = true;
     loadDays().catch(() => ({} as Record<string, Day>)).then((m) => {
@@ -107,7 +144,7 @@ export default function App() {
     if (!ready) return;
     const id = setTimeout(() => {
       for (const [k, d] of Object.entries(days)) {
-        if (!isDayKey(k) || saved.current[k] === d) continue;
+        if (!(isDayKey(k) || isSpanKey(k)) || saved.current[k] === d) continue;
         if (!saved.current[k] && !d.photos.length && !d.said.length) continue;   // a blank day that was never saved
         saved.current[k] = d;
         saveDay(k, d).catch(() => {});
@@ -132,7 +169,7 @@ export default function App() {
       if (now === today) return;
       setToday(now);
       if (busy.current) { roll.current = now; return; }
-      setCur((c) => (c === today ? now : c));
+      setCur((c) => (c === today || isSpanKey(c) ? now : c));
     };
     const id = setInterval(check, 20000);
     const sub = AppState.addEventListener('change', (st) => { if (st === 'active') check(); });
@@ -213,6 +250,7 @@ export default function App() {
       if (r.canceled || !r.assets.length) return;
       const kept = await Promise.all(r.assets.map((a) => keepPhoto(a.uri)));
       update(key, (d) => ({ ...d, photos: [...d.photos, ...kept] }));
+      grow(key);
       Haptics.selectionAsync().catch(() => {});
     } catch { /* picker unavailable */ }
   }
@@ -225,7 +263,78 @@ export default function App() {
       if (r.canceled || !r.assets.length) return;
       const kept = await keepPhoto(r.assets[0].uri);
       update(key, (d) => ({ ...d, photos: [...d.photos, kept] }));
+      grow(key);
     } catch { /* no camera, e.g. the simulator */ }
+  }
+  /* the camera key: a photo, or a page written on paper (taken now, or chosen from the library) */
+  async function camera() {
+    const c = await ask([S.shootPhoto, S.shootPaper, S.pickPaper]);
+    if (c === 0) shoot(); else if (c > 0) paper(c === 1);
+  }
+  /* one photo from the camera or the library */
+  async function one(cam: boolean) {
+    try {
+      if (cam) {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) { setNotice({ text: S.cameraDenied, action: settings }); return null; }
+      }
+      const r = cam ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+      return r.canceled || !r.assets.length ? null : r.assets[0];
+    } catch { return null; }
+  }
+  /* A page written on paper joins the day as it is: the photo of the page, and (if the person wants) the words read
+     from it, word for word, as the paragraph beside it; a page of several paragraphs carries on below. It goes straight
+     onto the laid-out page, and the words are never "fixed": they are the writer's own. */
+  async function paper(cam: boolean) {
+    const key = cur;
+    const a = await one(cam);
+    if (!a) return;
+    const c = await ask([S.readYes, S.readNo], S.readAsk);
+    if (c < 0) return;
+    const kept = { ...(await keepPhoto(a.uri)), ...(a.width && a.height ? { r: a.height / a.width } : {}) };
+    let text = '';
+    if (c === 0) {
+      setNotice({ text: S.reading });
+      try { text = await readPage(a.uri); setNotice(null); } catch { setNotice({ text: S.readFailed }); }
+    }
+    const [lead = '', ...rest] = text.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+    const at = Date.now();
+    update(key, (d) => {
+      const n = d.photos.length;
+      const items: Said[] = [{ kind: 'photos', paper: true, parts: [{ unit: { idx: [n] }, text: lead }], g: true, at },
+        ...rest.map((t): Said => ({ kind: 'talk', text: t, g: true, at }))];
+      return { ...d, photos: [...d.photos, kept], said: [...d.said.slice(0, d.laid), ...items, ...d.said.slice(d.laid)], laid: d.laid + items.length };
+    });
+    grow(key);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }
+
+  /* Stickers: one from the set or made from a photo goes onto the page where the person is looking; it can be moved,
+     turned, resized and peeled off. One made from a photo is cut out on the phone (iOS's own subject lifting). */
+  function addSticker(sk: string, at: { x: number; y: number; w: number; r: number }) {
+    const id = 's' + Date.now().toString(36);
+    update(cur, (d) => ({ ...d, stickers: [...(d.stickers ?? []), { id, s: sk, p: -1, ...at }] }));
+    setSlap(id);
+  }
+  function moveSticker(id: string, at: Partial<Sticker> | null) {
+    update(cur, (d) => ({ ...d, stickers: at ? (d.stickers ?? []).map((st) => (st.id === id ? { ...st, ...at } : st)) : (d.stickers ?? []).filter((st) => st.id !== id) }));
+  }
+  async function makeSticker(): Promise<string | null> {
+    if (!LoreVision) { setNotice({ text: S.liftNeedsApp }); return null; }
+    const c = await ask([S.shootPhoto, S.library]);
+    if (c < 0) return null;
+    const a = await one(c === 0);
+    if (!a) return null;
+    setNotice({ text: S.lifting });
+    try {
+      const made = await LoreVision.lift(a.uri);
+      if (!made) { setNotice({ text: S.liftNone }); return null; }
+      setNotice(null);
+      const rel = relative(made);
+      setMine((m) => { const next = [rel, ...m]; saveMine(next); return next; });
+      return 'file:' + rel;
+    } catch { setNotice({ text: S.liftNone }); return null; }
   }
 
   /* the first page with photos tells the person, once, that photos can be dragged (until the tutorial is designed) */
@@ -242,24 +351,99 @@ export default function App() {
      groups, placed photos and where photos were dragged all move along; this day is left empty */
   function moveDay(from: string, to: string) {
     if (from === to) return;
-    setDays((all) => {
-      const src = all[from] ?? EMPTY, dst = all[to] ?? EMPTY, off = dst.photos.length, n = dst.said.length;
-      const re = (idx: number[]) => idx.map((i) => i + off);
-      const said = src.said.map((x): Said => (x.kind === 'photos' ? { ...x, parts: x.parts.map((p) => ({ ...p, unit: { idx: re(p.unit.idx) } })) } : x));
-      const moved = Object.fromEntries(Object.entries(src.moved ?? {}).map(([k, v]) => [/^\d+-\d+$/.test(k) ? k.replace(/^\d+/, (i) => String(Number(i) + n)) : k, v]));
-      const allLaid = dst.laid === dst.said.length;
-      return {
-        ...all,
-        [from]: { ...EMPTY },
-        [to]: {
-          photos: [...dst.photos, ...src.photos], groups: [...dst.groups, ...src.groups.map(re)], said: [...dst.said, ...said],
-          laid: allLaid ? n + src.laid : dst.laid,
-          placed: [...(dst.placed ?? []), ...(src.placed ?? []).map((p) => ({ ...p, idx: re(p.idx) }))],
-          moved: { ...dst.moved, ...moved },
-        },
-      };
-    });
+    setDays((all) => ({ ...all, [from]: { ...EMPTY }, [to]: append(all[to] ?? EMPTY, all[from] ?? EMPTY) }));
     setCur(to);
+  }
+
+  /* Several days as one page (a trip, a long weekend): the days from first to last, with what is already written on
+     them in order, each day starting under its date. A page over several days that overlaps is taken in whole. */
+  function combine(from: string, to: string) {
+    setRanging(false);
+    let lo = from, hi = to;
+    for (const [k, d] of Object.entries(days)) if (isSpanKey(k) && d.span && d.span.from <= hi && d.span.to >= lo && (d.said.length || d.photos.length)) {
+      if (d.span.from < lo) lo = d.span.from;
+      if (d.span.to > hi) hi = d.span.to;
+    }
+    const key = 'r-' + lo;
+    setDays((all) => {
+      const next = { ...all };
+      let page: Day = { ...EMPTY };
+      for (let x = lo; x <= hi; x = shift(x, 1)) {
+        const sp = all['r-' + x];
+        if (sp?.span && (sp.said.length || sp.photos.length)) { page = append(page, sp); next['r-' + x] = { ...EMPTY }; x = sp.span.to; continue; }
+        const d = all[x];
+        if (!d || (!d.said.length && !d.photos.length)) continue;
+        const dt = dateTitle(x, lang);
+        page = append(page, { ...d, said: [{ kind: 'head', text: `${dt.title} · ${dt.meta}`, day: x }, ...d.said], laid: d.laid + 1 });
+        next[x] = { ...EMPTY };
+      }
+      next[key] = { ...page, laid: page.said.length, span: { from: lo, to: hi } };
+      return next;
+    });
+    setCur(hi);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }
+  /* back to separate days: each item goes to the day it was said (or, without a time, the day it was written under);
+     photos not on the page, placed photos and stickers go to the first day */
+  function split(key: string) {
+    const d = days[key];
+    if (!d?.span) return;
+    const { from, to } = d.span;
+    const clamp = (k: string) => (k < from ? from : k > to ? to : k);
+    let under = from;
+    const owner = d.said.map((x) => {
+      if (x.kind === 'head') { if (x.day) under = x.day; return ''; }
+      return x.at ? clamp(dayKey(new Date(x.at))) : under;
+    });
+    /* a time heading goes with what follows it */
+    for (let i = owner.length - 1; i >= 0; i--) if (!owner[i] && !(d.said[i].kind === 'head' && (d.said[i] as { day?: string }).day)) owner[i] = owner[i + 1] ?? under;
+    const targets = [...new Set(owner.filter(Boolean))];
+    if (!targets.length) targets.push(from);
+    const first = targets[0];
+    const used = new Set<number>();
+    const built: Record<string, Day> = {};
+    for (const tk of targets) {
+      const idx = d.said.map((_, i) => i).filter((i) => owner[i] === tk);
+      const map = new Map<number, number>();
+      const photos: Day['photos'] = [];
+      const take = (i: number) => { if (!map.has(i)) { map.set(i, photos.length); photos.push(d.photos[i]); used.add(i); } return map.get(i)!; };
+      const said = idx.map((i): Said => { const x = d.said[i]; return x.kind === 'photos' ? { ...x, parts: x.parts.map((p) => ({ ...p, unit: { idx: p.unit.idx.map(take) } })) } : x; });
+      const pos = new Map(idx.map((i, n) => [i, n]));
+      const moved = Object.fromEntries(Object.entries(d.moved ?? {}).flatMap(([k, v]) => {
+        const m = /^(\d+)-(\d+)$/.exec(k);
+        return m && pos.has(+m[1]) ? [[`${pos.get(+m[1])}-${m[2]}`, v]] : [];
+      }));
+      built[tk] = { ...EMPTY, photos, said, laid: idx.filter((i) => i < d.laid).length, moved };
+    }
+    /* the rest goes to the first day */
+    const f = built[first], map = new Map<number, number>();
+    d.photos.forEach((p, i) => { if (!used.has(i)) { map.set(i, f.photos.length); f.photos.push(p); } });
+    f.placed = (d.placed ?? []).map((p) => ({ ...p, idx: p.idx.filter((i) => map.has(i)).map((i) => map.get(i)!) })).filter((p) => p.idx.length);
+    f.moved = { ...f.moved, ...Object.fromEntries(Object.entries(d.moved ?? {}).filter(([k]) => k.startsWith('p'))) };
+    f.groups = d.groups.filter((g) => g.every((i) => map.has(i))).map((g) => g.map((i) => map.get(i)!));
+    f.stickers = d.stickers;
+    setDays((all) => {
+      const next = { ...all, [key]: { ...EMPTY } };
+      for (const tk of targets) next[tk] = append(all[tk] ?? EMPTY, built[tk]);
+      return next;
+    });
+    setCur(first);
+  }
+  /* writing on a page over several days after its last day: the page now runs to today, unless today has its own page */
+  function grow(key: string) {
+    if (!isSpanKey(key)) return;
+    const own = days[today];
+    if (own && (own.said.length || own.photos.length)) return;
+    update(key, (d) => (d.span && d.span.to < today ? { ...d, span: { ...d.span, to: today } } : d));
+  }
+
+  /* a choice from a short list: the action sheet on the phone (-1 when cancelled); the web preview takes the first */
+  function ask(options: string[], title?: string): Promise<number> {
+    return new Promise((res) => {
+      if (Platform.OS === 'ios') ActionSheetIOS.showActionSheetWithOptions({ options: [...options, S.cancel], cancelButtonIndex: options.length, title }, (b) => res(b < options.length ? b : -1));
+      else if (Platform.OS === 'web') res(0);
+      else Alert.alert(title ?? '', '', [...options.map((o, i) => ({ text: o, onPress: () => res(i) })), { text: S.cancel, style: 'cancel' as const, onPress: () => res(-1) }]);
+    });
   }
 
   /* an edited recording, or an edited caption of one photo; emptied words stay as an empty entry, so nothing else moves */
@@ -280,9 +464,9 @@ export default function App() {
     setMaking(true);
     const wait = new Promise((r) => setTimeout(r, 2000));
     const fixOne = (t: string) => (t.trim() ? fixText(t, true).catch(() => t) : Promise.resolve(t));
-    const said0 = d0.said.filter((x): x is Exclude<Said, { kind: 'head' }> => x.kind !== 'head');   // headings are found again each time
+    const said0 = d0.said.filter((x) => x.kind !== 'head' || !!x.day);   // time headings are found again each time; a day's heading stays
     const items: Said[] = agentOn && grammar
-      ? await Promise.all(said0.map(async (x): Promise<Said> => (x.g ? x : x.kind === 'talk'
+      ? await Promise.all(said0.map(async (x): Promise<Said> => (x.kind === 'head' || x.g ? x : x.kind === 'talk'
         ? { ...x, text: await fixOne(x.text), g: true }
         : { ...x, parts: await Promise.all(x.parts.map(async (p) => ({ ...p, text: await fixOne(p.text) }))), g: true })))
       : said0;
@@ -375,18 +559,29 @@ export default function App() {
   const isDark = mode === 'auto' ? system === 'dark' : mode === 'dark';
   const t = isDark ? darkT : lightT;
   const h = new Date().getHours();
-  const entry = isDayKey(cur) || cur === 'week' ? null : S.entries[Number(cur.slice(1))];
+  const entry = isDayKey(cur) || isSpanKey(cur) || cur === 'week' ? null : S.entries[Number(cur.slice(1))];
   /* the title says which day this is, and opens the menu of days: today, yesterday, the day before and this week */
   const yest = shift(today, -1), before = shift(today, -2);
-  const nameOf = (k: string) => (k === 'week' ? S.navWeek : k === today ? S.navToday : k === yest ? S.navYesterday : k === before ? S.navBefore : dateTitle(k, lang).title);
-  const has = (k: string) => !!days[k] && (days[k].said.length > 0 || days[k].photos.length > 0);
+  /* a page over several days is named by its first and last day ("10月18日 – 20日") */
+  const spanName = (k: string) => {
+    const sp = days[k]?.span;
+    if (!sp) return '';
+    const a = dateTitle(sp.from, lang).title, b = dateTitle(sp.to, lang).title;
+    const same = sp.from.slice(0, 7) === sp.to.slice(0, 7);
+    return S.spanTitle(a, same ? (lang === 'zh' ? `${Number(sp.to.slice(8))}日` : String(Number(sp.to.slice(8)))) : b);
+  };
+  const spanDays = (k: string) => { const sp = days[k]?.span; return sp ? Math.round((Date.parse(sp.to) - Date.parse(sp.from)) / 86400000) + 1 : 0; };
+  const nameOf = (k: string) => (isSpanKey(k) ? spanName(k) : k === 'week' ? S.navWeek : k === today ? S.navToday : k === yest ? S.navYesterday : k === before ? S.navBefore : dateTitle(k, lang).title);
+  const has = (k: string) => { const d = days[links[k] ?? k]; return !!d && (d.said.length > 0 || d.photos.length > 0); };
   const [ty, tm, td] = today.split('-').map(Number);
   const monday = shift(today, -((new Date(ty, tm - 1, td).getDay() + 6) % 7));
   const weekKeys: string[] = [];
-  for (let k = monday; k <= today; k = shift(k, 1)) weekKeys.push(k);
-  const menuOpts = [...[today, yest, before].map((k) => ({ key: k, label: nameOf(k), date: dateTitle(k, lang).title, has: has(k) })),
-    { key: 'week', label: S.navWeek, date: S.weekLabel, has: weekKeys.some(has) }];
-  const dated = dateTitle(isDayKey(cur) ? cur : today, lang);
+  for (let k = monday; k <= today; k = shift(k, 1)) if (!weekKeys.includes(links[k] ?? k)) weekKeys.push(links[k] ?? k);
+  const menuOpts = [...[today, yest, before].map((k) => ({ key: k, label: nameOf(k), date: links[k] ? spanName(links[k]) : dateTitle(k, lang).title, has: has(k) })),
+    { key: 'week', label: S.navWeek, date: S.weekLabel, has: weekKeys.some(has) },
+    { key: 'combine', label: S.combine, date: '', has: false },
+    ...(isSpanKey(cur) ? [{ key: 'split', label: S.split, date: '', has: false }] : [])];
+  const dated = isSpanKey(cur) ? { title: spanName(cur), meta: S.nDays(spanDays(cur)) } : dateTitle(isDayKey(cur) ? cur : today, lang);
 
   return (
     <SafeAreaProvider>
@@ -399,20 +594,23 @@ export default function App() {
               <>
                 {cur === 'week' ? (
                   <Week days={days} keys={weekKeys} title={S.navWeek} voice={voice} indent={indent} onTitle={() => setMenu(true)} onOpen={setPane} onDay={setCur}
-                    labelOf={(k) => `${dateTitle(k, lang).meta} · ${dateTitle(k, lang).title}`} />
+                    labelOf={(k) => (isSpanKey(k) ? spanName(k) : `${dateTitle(k, lang).meta} · ${dateTitle(k, lang).title}`)} />
                 ) : (
                 <Home day={cur} hidden={pane !== null} night={h >= 18 || h < 5}
-                  past={!!entry} title={entry ? entry.when : nameOf(cur)} onTitle={entry ? undefined : () => setMenu(true)} onDate={entry ? undefined : () => setPicking(true)} onToday={() => setCur(today)}
+                  past={!!entry} title={entry ? entry.when : nameOf(cur)} onTitle={entry ? undefined : () => setMenu(true)} onDate={entry || isSpanKey(cur) ? undefined : () => setPicking(true)} onToday={() => setCur(today)}
                   pageTitle={entry ? entry.t : dated.title} pageMeta={entry ? '' : dated.meta}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}
                   onRemove={(idx) => { setPast((m) => ({ ...m, [cur]: [] })); update(cur, (d) => removePhotos(d, idx)); }}
-                  said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} indent={indent} onCamera={shoot} onPick={pick} onOpen={setPane} onRecord={rec}
-                  onSaved={(x) => update(cur, (d) => ({ ...d, said: [...d.said, x] }))} onLayout={layout} onUndo={past[cur]?.length ? undo : undefined} onMerge={mergeUp} onNotice={setNotice}
+                  said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} indent={indent} onCamera={camera} onPick={pick} onOpen={setPane} onRecord={rec}
+                  onSaved={(x) => { update(cur, (d) => ({ ...d, said: [...d.said, x] })); grow(cur); }} onLayout={layout} onUndo={past[cur]?.length ? undo : undefined} onMerge={mergeUp} onNotice={setNotice}
                   placed={day.placed} moved={day.moved} onText={editText}
                   onPlace={(idx, at) => { const id = 'p' + Date.now().toString(36); update(cur, (d) => ({ ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } })); }}
-                  onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))} />
+                  onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))}
+                  stickers={day.stickers} slap={slap} mine={mine} onAddSticker={addSticker} onSticker={moveSticker} onMakeSticker={makeSticker} />
                 )}
-                {menu ? <DayMenu opts={menuOpts} cur={cur} onPick={(k) => { setMenu(false); setCur(k); }} onClose={() => setMenu(false)} /> : null}
+                {menu ? <DayMenu opts={menuOpts} cur={curKey === cur ? cur : curKey} onClose={() => setMenu(false)}
+                  onPick={(k) => { setMenu(false); if (k === 'combine') setRanging(true); else if (k === 'split') split(cur); else setCur(k); }} /> : null}
+                {ranging ? <RangePicker today={today} has={has} onClose={() => setRanging(false)} onPick={combine} /> : null}
                 {picking ? (
                   <DayMenu heading={S.whichDay} cur={cur} onClose={() => setPicking(false)} onPick={(k) => { setPicking(false); moveDay(cur, k); }}
                     opts={Array.from({ length: 14 }, (_, i) => shift(today, -i)).map((k) => ({ key: k, label: `${dateTitle(k, lang).title}  ${dateTitle(k, lang).meta}`, date: k === today ? S.navToday : k === yest ? S.navYesterday : '', has: has(k) }))} />

@@ -49,6 +49,18 @@ export async function sectionsOf(sentences: string[]): Promise<{ sections: { sen
   return { sections: j.sections ?? [], breaks: j.breaks ?? [] };
 }
 
+/* the paper-page node: a photo of a handwritten page, read word for word (nothing corrected) */
+export async function readPage(uri: string): Promise<string> {
+  if (!agentOn) return DEMO_PAGE;
+  const image = await new File(uri).base64();
+  const mime = /\.png$/i.test(uri) ? 'image/png' : 'image/jpeg';
+  const r = await fetch(`${URL}/read`, { method: 'POST', headers: { 'x-lore-key': KEY, 'content-type': 'application/json' }, body: JSON.stringify({ image, mime }) });
+  if (!r.ok) throw new Error(String(r.status));
+  return (await r.json()).text ?? '';
+}
+/* the web preview has no backend: a page reads as this */
+const DEMO_PAGE = '下午在图书馆坐了很久，本来想写论文，结果一直在看窗外的银杏树。叶子黄了一半，风一吹就往下掉。';
+
 /* the raw transcript, marked word by word: false where the tidy took it out (shown struck through for a moment) */
 export function marked(raw: string, text: string): [string, boolean][] {
   const tok = (s: string) => s.match(/[\u3400-\u9fff]|[A-Za-z0-9'’]+|\s+|[^\sA-Za-z0-9'’\u3400-\u9fff]/g) ?? [];

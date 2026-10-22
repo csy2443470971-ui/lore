@@ -4,17 +4,19 @@ import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Page, solo, Stream } from './Doc';
+import { Page, pieces, solo, Stream } from './Doc';
+import { ShareSheet } from './Share';
+import { StickerBox } from './StickerBox';
 import { Mosaic, src, Tray } from './Photos';
 import { agentOn, Heard, marked, transcribe } from './agent';
-import { Pic, Placed, Pos, Said, Unit, unitsOf } from './session';
+import { Pic, Placed, Pos, Said, Sticker, Unit, unitsOf } from './session';
 import { keepRecording } from './store';
 import { SZ } from './theme';
 import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, useTimer } from './ui';
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onUndo, onMerge, onNotice }: {
+export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onUndo, onMerge, onNotice, stickers, slap, mine, onAddSticker, onSticker, onMakeSticker }: {
   hidden: boolean; night: boolean;
   day: string;                                      // which day is shown; switching days keeps this screen and swaps only the page
   past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
@@ -30,6 +32,10 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   onOpen: (p: 'archive' | 'settings') => void;
   onRecord: { start: () => Promise<boolean>; stop: () => Promise<string | null>; cancel: () => Promise<string | null> };
   onUndo?: () => void;                               // back to the page as it was before the last lay out, join or edit
+  stickers?: Sticker[]; slap?: string; mine: string[];   // the page's stickers, the one just put on, and those made from photos
+  onAddSticker: (s: string, at: { x: number; y: number; w: number; r: number }) => void;
+  onSticker: (id: string, at: Partial<Sticker> | null) => void;
+  onMakeSticker: () => Promise<string | null>;        // a sticker cut out of a photo, or null
   onMerge: (item: number) => void;                    // join a paragraph to the one above it
   onSaved: (s: Said) => void; onLayout: () => void; onNotice: (n: Notice) => void;
   onText: (item: number, part: number, text: string) => void;   // an edited recording, or an edited photo caption (part)
@@ -58,6 +64,10 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const area = useRef<View>(null);                                  // the page's text area, where tray photos can be dropped
   const [editing, setEditing] = useState<{ item: number; part: number } | null>(null);
+  const [choosing, setChoosing] = useState<Set<string> | null>(null);   // choosing paragraphs and photos for a share image
+  const [sharing, setSharing] = useState(false);
+  const [stickerBox, setStickerBox] = useState(false);                  // the sticker box is open
+  const [bin, setBin] = useState<'on' | 'over' | null>(null);           // a sticker is being carried: the bin shows in the talk key's place
   const [draft, setDraft] = useState('');
   const lift = useRef<{ u: Unit; moved: boolean; carried: boolean } | null>(null);   // a tray photo picked up by a long press
   const [ghost, setGhost] = useState<Pic[] | null>(null);
@@ -74,7 +84,7 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   useEffect(() => {
     if (shownDay.current === day) return;
     shownDay.current = day;
-    setK(-1); setLines({}); setSelect(false); setSel([]); setEditing(null); setGhost(null); setOver(null);
+    setK(-1); setLines({}); setSelect(false); setSel([]); setEditing(null); setGhost(null); setOver(null); setChoosing(null); setSharing(false); setStickerBox(false);
     scroll.current?.scrollTo({ y: 0, animated: false });
     turn.setValue(0.25);
     Animated.timing(turn, { toValue: 1, duration: 200, useNativeDriver: true }).start();
@@ -234,13 +244,32 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   const take = useCallback(() => { if (!lift.current) return false; lift.current.moved = true; return true; }, []);
   const hold = useCallback(() => { if (lift.current) lift.current.carried = true; }, []);
   /* a long press on a paragraph offers to join it to the one above */
-  const holdPara = (item: number) => {
+  /* a long press on a paragraph: share it (choosing more), or join it to the one above */
+  const holdPara = (item: number, first: boolean) => {
     if (recording) return;
     Haptics.selectionAsync().catch(() => {});
-    if (Platform.OS === 'ios') ActionSheetIOS.showActionSheetWithOptions({ options: [S.mergeUp, S.cancel], cancelButtonIndex: 1 }, (b) => { if (b === 0) onMerge(item); });
-    else if (Platform.OS === 'web') { if (window.confirm(S.mergeUp)) onMerge(item); }
-    else Alert.alert('', '', [{ text: S.mergeUp, onPress: () => onMerge(item) }, { text: S.cancel, style: 'cancel' }]);
+    const share = () => setChoosing(new Set([`t${item}`]));
+    const opts = first ? [S.shareThis] : [S.shareThis, S.mergeUp];
+    const run = (b: number) => { if (b === 0) share(); else if (b === 1) onMerge(item); };
+    if (Platform.OS === 'ios') ActionSheetIOS.showActionSheetWithOptions({ options: [...opts, S.cancel], cancelButtonIndex: opts.length }, run);
+    else if (Platform.OS === 'web') share();
+    else Alert.alert('', '', [...opts.map((o, b) => ({ text: o, onPress: () => run(b) })), { text: S.cancel, style: 'cancel' as const }]);
   };
+  const choose = (key: string) => setChoosing((c) => {
+    const next = new Set(c ?? []);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    Haptics.selectionAsync().catch(() => {});
+    return next;
+  });
+  /* a sticker goes onto the page where the person is looking: near the top of the screen, at the right, a little tilted */
+  const putSticker = (sk: string) => {
+    setStickerBox(false);
+    const pw = W - 2 * SZ.px, w = 92;
+    const place = (y: number) => onAddSticker(sk, { x: Math.round(pw - w - 4 - Math.random() * 40), y: Math.max(0, Math.round(y)), w, r: Math.round((Math.random() * 24 - 12) * 10) / 10 });
+    if (!area.current) { place(40); return; }
+    area.current.measureInWindow((_x, ay) => place(top + 50 + 80 + Math.random() * 60 - ay));
+  };
+  const makeSticker = async () => { setStickerBox(false); const sk = await onMakeSticker(); if (sk) putSticker(sk); };
   const scrolled = useCallback(() => { if (lift.current) lift.current.moved = true; }, []);
   const follow = useCallback((x: number, y: number) => handlers.current.carryTo(x, y), []);
   const letGo = useCallback((x: number, y: number) => handlers.current.dropAt(x, y), []);
@@ -252,13 +281,14 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
   const unlaid = said.slice(laid);
   const nothing = !said.length && !photos.length && !liveTalk && !making && real === 'idle';
   const canLayout = unlaid.length > 0 && !recording && !shown && !making && !select && real === 'idle';
-  const canRelayout = laid > 0 && !unlaid.length && !recording && !shown && !making && !select && real === 'idle' && !ghost;   // a laid-out day can be laid out again
+  const canRelayout = laid > 0 && !unlaid.length && !recording && !shown && !making && !select && real === 'idle' && !ghost && !choosing && !bin;   // a laid-out day can be laid out again
   const top = ins.top + 8;
   const ctlBottom = ins.bottom + 30;
   const ctlH = SZ.talk + 28;
   const listBottom = ctlBottom + ctlH + (canLayout || canRelayout ? 96 : 30);
   const tx = [zh ? h.tx : h.txEn, { color: t.ink, fontFamily: face.body }];
   const reached = livePhotos ? pending.filter((n) => lines[n] || n === k) : [];
+  const binAt = { x: W / 2, y: Dimensions.get('window').height - ctlBottom - ctlH / 2 };   // the bin sits where the talk key is
 
   return (
     <Animated.View pointerEvents={hidden ? 'none' : 'box-none'} style={[StyleSheet.absoluteFill, { opacity: fade }]}>
@@ -275,7 +305,9 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page key={day} items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
             preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent} onTitle={recording ? undefined : onDate}
-            onDrag={setDragging} onMove={onMove} onEdit={edit} onHold={holdPara} /> : null}
+            onDrag={setDragging} onMove={onMove} onEdit={edit} onHold={holdPara}
+            chosen={choosing ?? undefined} onChoose={choosing ? choose : undefined}
+            stickers={stickers} slap={slap} onSticker={onSticker} bin={binAt} onStickerDrag={(st) => { setBin(st); setDragging(!!st); }} /> : null}
 
           {showTray ? (
             <View style={{ gap: 10 }}>
@@ -356,12 +388,24 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
               <Text style={[h.relayoutHint, { color: t.mut, fontFamily: face.body }]}>{S.relayoutHint}</Text>
               <Round icon="layout" label={S.relayoutHint} onPress={onLayout} />
             </View>
+            <View style={h.againOne}>
+              <Text style={[h.relayoutHint, { color: t.mut, fontFamily: face.body }]}>{S.stickers}</Text>
+              <Round icon="sticker" label={S.stickers} onPress={() => setStickerBox(true)} />
+            </View>
           </View>
         </View>
       ) : null}
 
-      <View style={[h.ctl, { bottom: ctlBottom, height: ctlH }]} pointerEvents={making ? 'none' : 'box-none'}>
-        {select ? (
+      <View style={[h.ctl, { bottom: ctlBottom, height: ctlH, opacity: bin ? 0 : 1 }]} pointerEvents={making || bin ? 'none' : 'box-none'}>
+        {choosing ? (
+          <View style={{ alignItems: 'center', gap: 10 }}>
+            <Text style={{ fontSize: 12.5, color: t.mut }}>{choosing.size ? S.chosenN([...choosing].filter((c) => c.startsWith('t')).length, [...choosing].filter((c) => !c.startsWith('t')).length) : S.chooseShare}</Text>
+            <View style={h.selRow}>
+              <Pressable onPress={() => setChoosing(null)} style={[h.ghost, { backgroundColor: t.panel }]}><Text style={{ color: t.ink, fontSize: 14.5 }}>{S.cancel}</Text></Pressable>
+              <Pressable disabled={!choosing.size} onPress={() => setSharing(true)} style={[h.pill, { backgroundColor: t.pill, opacity: choosing.size ? 1 : 0.4 }]}><Text style={{ color: t.pillText, fontSize: 14.5, fontWeight: '500' }}>{S.makeCard}</Text></Pressable>
+            </View>
+          </View>
+        ) : select ? (
           <View style={h.selRow}>
             <Pressable onPress={() => setSel([])} style={[h.ghost, { backgroundColor: t.panel }]}><Text style={{ color: t.ink, fontSize: 14.5 }}>{S.clear}</Text></Pressable>
             <Pressable onPress={group} style={[h.pill, { backgroundColor: t.pill, opacity: sel.length < 2 ? 0.4 : 1 }]}><Text style={{ color: t.pillText, fontSize: 14.5, fontWeight: '500' }}>{S.makeGroup(sel.length)}</Text></Pressable>
@@ -377,6 +421,26 @@ export function Home({ day, hidden, night, past, title, onTitle, onDate, pageTit
           {ghost.length > 1 ? <Mosaic pics={ghost} w={g.w} h={g.h} r={8} /> : <Image source={src(ghost[0])} contentFit="cover" style={{ width: g.w, height: g.h, borderRadius: 8 }} />}
         </Animated.View>
       ) : null}
+
+      {bin ? (
+        <View pointerEvents="none" style={[h.bin, { top: binAt.y - 32 - 26, left: W / 2 - 70, width: 140 }]}>
+          <Text style={{ fontSize: 11.5, color: t.mut, marginBottom: 8 }}>{S.binHint}</Text>
+          <View style={[h.binDot, { backgroundColor: bin === 'over' ? t.red : t.panel, transform: [{ scale: bin === 'over' ? 1.15 : 1 }] }]}>
+            <Text style={{ fontSize: 22, color: bin === 'over' ? '#fff' : t.ink }}>×</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {stickerBox ? <StickerBox mine={mine} onPick={putSticker} onMake={makeSticker} onClose={() => setStickerBox(false)} /> : null}
+      {sharing && choosing ? (() => {
+        const { paras, tiles } = pieces(said.slice(0, laid), photos, placed);
+        return (
+          <ShareSheet day={day} title={pageTitle} meta={pageMeta}
+            paras={paras.filter((x) => choosing.has(x.key)).map((x) => x.text)}
+            pics={tiles.filter((x) => choosing.has(x.key)).flatMap((x) => x.pics).slice(0, 4)}
+            onClose={() => setSharing(false)} onNotice={(text) => onNotice({ text })} />
+        );
+      })() : null}
 
       {editing ? (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[StyleSheet.absoluteFill, h.editWrap]}>
@@ -428,6 +492,8 @@ const h = StyleSheet.create({
   layoutWrap: { position: 'absolute', left: SZ.px, right: SZ.px, alignItems: 'center', gap: 8 },
   layoutHint: { fontSize: 13, textAlign: 'center' },
   relayoutHint: { fontSize: 11.5, textAlign: 'center' },
+  bin: { position: 'absolute', alignItems: 'center', zIndex: 20 },
+  binDot: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
   again: { flexDirection: 'row', gap: 28 },
   againOne: { alignItems: 'center', gap: 8 },
   layout: { height: 38, paddingHorizontal: 22, borderRadius: 19, justifyContent: 'center' },
