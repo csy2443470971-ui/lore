@@ -77,7 +77,7 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
     keepRecording(uri).then((kept) => transcribe(kept, grammar).then((r) => {
       if (!r.text.trim()) { setReal('idle'); onNotice({ text: S.heardNothing }); return; }
       setHeard(r); setReal('show');
-      setTimeout(() => { onSaved({ kind: 'talk', text: r.text, audio: kept }); setReal('idle'); setHeard(null); }, 1500);
+      setTimeout(() => { onSaved({ kind: 'talk', text: r.text, audio: kept, g: grammar }); setReal('idle'); setHeard(null); }, 1500);
     }).catch((e: unknown) => {
       setReal('idle');
       onNotice({ text: `${S.notReached} (${String(e instanceof Error ? e.message : e).slice(0, 40)})`, action: { label: S.retry, run: () => send(kept) } });
@@ -214,10 +214,11 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
   const unlaid = said.slice(laid);
   const nothing = !said.length && !photos.length && !liveTalk && !making && real === 'idle';
   const canLayout = unlaid.length > 0 && !recording && !shown && !making && !select && real === 'idle';
+  const canRelayout = laid > 0 && !unlaid.length && !recording && !shown && !making && !select && real === 'idle' && !ghost;   // a laid-out day can be laid out again
   const top = ins.top + 8;
   const ctlBottom = ins.bottom + 30;
   const ctlH = SZ.talk + 28;
-  const listBottom = ctlBottom + ctlH + (canLayout ? 96 : 30);
+  const listBottom = ctlBottom + ctlH + (canLayout || canRelayout ? 96 : 30);
   const tx = [zh ? h.tx : h.txEn, { color: t.ink, fontFamily: face.body }];
   const reached = livePhotos ? pending.filter((n) => lines[n] || n === k) : [];
 
@@ -300,6 +301,11 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
             <Text style={{ fontSize: 14.5, color: t.ink }}>{S.layoutBtn}</Text>
           </Pressable>
         </View>
+      ) : canRelayout ? (
+        <View style={[h.layoutWrap, { bottom: ctlBottom + ctlH + 16 }]} pointerEvents="box-none">
+          <Text style={[h.relayoutHint, { color: t.mut, fontFamily: face.body }]}>{S.relayoutHint}</Text>
+          <Round icon="layout" label={S.relayoutHint} onPress={onLayout} />
+        </View>
       ) : null}
 
       <View style={[h.ctl, { bottom: ctlBottom, height: ctlH }]} pointerEvents={making ? 'none' : 'box-none'}>
@@ -367,6 +373,7 @@ const h = StyleSheet.create({
   fadeOut: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   layoutWrap: { position: 'absolute', left: SZ.px, right: SZ.px, alignItems: 'center', gap: 8 },
   layoutHint: { fontSize: 13, textAlign: 'center' },
+  relayoutHint: { fontSize: 11.5, textAlign: 'center' },
   layout: { height: 38, paddingHorizontal: 22, borderRadius: 19, justifyContent: 'center' },
   ctl: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'flex-start' },
   selRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: (SZ.talk - SZ.key) / 2 },

@@ -4,8 +4,8 @@ export type Pic = { uri?: string; asset?: number; file?: string };
 export type Unit = { idx: number[] };            // one photo, or a group of photos (indices into the picked list)
 /* spoken: the sentence as said ("one is the café…"); text: the same words without the number, used as the caption */
 export type Part = { unit: Unit; text: string; spoken?: string };
-/* audio: the recording the words came from, kept on the phone */
-export type Said = { kind: 'talk'; text: string; audio?: string } | { kind: 'photos'; parts: Part[] };
+/* audio: the recording the words came from, kept on the phone; g: the words have had the grammar fix, or were edited by hand */
+export type Said = { kind: 'talk'; text: string; audio?: string; g?: boolean } | { kind: 'photos'; parts: Part[]; audio?: string; g?: boolean };
 /* placed: photos dragged from the tray onto the page; moved: where a photo on the page was dragged to, by its key */
 export type Placed = { id: string; idx: number[] };
 export type Pos = { x: number; y: number };

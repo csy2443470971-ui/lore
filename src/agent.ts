@@ -34,6 +34,13 @@ export async function tidyText(text: string): Promise<string> {
   return (await r.json()).text;
 }
 
+/* words already on the phone, corrected once when a day is laid out again: misheard words and, with grammar on, grammar */
+export async function fixText(text: string, grammar: boolean): Promise<string> {
+  const r = await fetch(`${URL}/fix`, { method: 'POST', headers: { 'x-lore-key': KEY, 'content-type': 'application/json' }, body: JSON.stringify({ text, grammar }) });
+  if (!r.ok) throw new Error(String(r.status));
+  return (await r.json()).text;
+}
+
 /* the raw transcript, marked word by word: false where the tidy took it out (shown struck through for a moment) */
 export function marked(raw: string, text: string): [string, boolean][] {
   const tok = (s: string) => s.match(/[\u3400-\u9fff]|[A-Za-z0-9'’]+|\s+|[^\sA-Za-z0-9'’\u3400-\u9fff]/g) ?? [];

@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import * as Updates from 'expo-updates';
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,6 +13,7 @@ import { Lang, STR } from './src/data';
 import { PHOTO } from './src/images';
 import { Day, removePhotos, Said } from './src/session';
 import { match } from './src/match';
+import { agentOn, fixText } from './src/agent';
 import { dayKey, isDayKey, keepPhoto, loadDays, saveDay } from './src/store';
 import { useLive } from './src/live';
 import { dark as darkT, light as lightT } from './src/theme';
@@ -97,6 +99,12 @@ export default function App() {
     return () => clearTimeout(id);
   }, [days, ready]);
 
+  const { isUpdatePending } = Updates.useUpdates();
+  const [opened] = useState(() => Date.now());
+  useEffect(() => {
+    if (isUpdatePending && Updates.isEnabled && Date.now() - opened < 20000) Updates.reloadAsync().catch(() => {});
+  }, [isUpdatePending, opened]);
+
   const day = days[cur] ?? EMPTY;
   const update = (key: string, f: (d: Day) => Day) => setDays((m) => ({ ...m, [key]: f(m[key] ?? EMPTY) }));
   const settings = { label: S.openSettings, run: () => { Linking.openSettings().catch(() => {}); } };
@@ -149,26 +157,47 @@ export default function App() {
   function editText(item: number, part: number, text: string) {
     update(cur, (d) => ({
       ...d,
-      said: d.said.map((x, i) => (i !== item ? x : x.kind === 'talk' ? { ...x, text }
-        : { ...x, parts: x.parts.map((p, j) => (j === part ? { ...p, text, spoken: undefined } : p)) })),
+      said: d.said.map((x, i) => (i !== item ? x : x.kind === 'talk' ? { ...x, text, g: true }
+        : { ...x, g: true, parts: x.parts.map((p, j) => (j === part ? { ...p, text, spoken: undefined } : p)) })),
     }));
   }
 
-  /* laying out is a step the person chooses; it takes everything said so far */
-  function layout() {
-    const key = cur;
-    /* a recording that names photos by number ("一号是…", "number two is…") is split into a part per photo here, in code */
-    const said = day.said.flatMap((x, i): Said[] => {
-      if (i < day.laid || x.kind !== 'talk' || !day.photos.length) return [x];
-      const m = match(x.text, day.photos.length);
-      if (!m.parts.length) return [x];
-      return [...(m.before ? [{ kind: 'talk' as const, text: m.before }] : []), { kind: 'photos' as const, parts: m.parts }];
-    });
-    const n = said.length;
+  /* laying out is a step the person chooses, and a laid-out day can be laid out again. It takes everything said so far:
+     words that haven't had the grammar fix get it once (when "Fix grammar" is on), then every recording that is still
+     plain text is matched to photos again, so older words also pick up the photo numbers found mid-sentence */
+  async function layout() {
+    const key = cur, d0 = day, count = d0.photos.length;
     setMaking(true);
-    /* a photo now talked about leaves the spot it was dropped on and goes beside its words */
-    const talkedOf = new Set(said.flatMap((x) => (x.kind === 'photos' ? x.parts.flatMap((p) => p.unit.idx) : [])));
-    setTimeout(() => { update(key, (d) => ({ ...d, said, laid: n, placed: d.placed?.filter((p) => !p.idx.some((i) => talkedOf.has(i))) })); tipDrag({ ...day, said }, n); setMaking(false); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }, 2000);
+    const wait = new Promise((r) => setTimeout(r, 2000));
+    const fixOne = (t: string) => (t.trim() ? fixText(t, true).catch(() => t) : Promise.resolve(t));
+    const items: Said[] = agentOn && grammar
+      ? await Promise.all(d0.said.map(async (x): Promise<Said> => (x.g ? x : x.kind === 'talk'
+        ? { ...x, text: await fixOne(x.text), g: true }
+        : { ...x, parts: await Promise.all(x.parts.map(async (p) => ({ ...p, text: await fixOne(p.text) }))), g: true })))
+      : d0.said;
+    /* a recording that names photos by number ("一号是…", "the picture one is…") is split into a part per photo, in code;
+       a photo that already has its words keeps them, and a second mention stays plain text */
+    const taken = new Set(items.flatMap((x) => (x.kind === 'photos' ? x.parts.flatMap((p) => p.unit.idx) : [])));
+    const said = items.flatMap((x): Said[] => {
+      if (x.kind !== 'talk' || !count) return [x];
+      const m = match(x.text, count);
+      if (!m.parts.length) return [x];
+      const parts = m.parts.map((p) => ({ ...p, unit: { idx: p.unit.idx.filter((i) => !taken.has(i)) } }));
+      parts.forEach((p) => p.unit.idx.forEach((i) => taken.add(i)));
+      return [...(m.before ? [{ kind: 'talk' as const, text: m.before, g: x.g }] : []), { kind: 'photos' as const, parts, audio: x.audio, g: x.g }];
+    });
+    await wait;
+    const n = said.length;
+    /* a photo now talked about leaves the spot it was dropped on and goes beside its words; where photos beside
+       paragraphs were dragged to is forgotten, since the paragraphs may have changed */
+    update(key, (d) => ({
+      ...d, said, laid: n,
+      placed: d.placed?.filter((p) => !p.idx.some((i) => taken.has(i))),
+      moved: Object.fromEntries(Object.entries(d.moved ?? {}).filter(([k]) => k.startsWith('p'))),
+    }));
+    tipDrag({ ...d0, said }, n);
+    setMaking(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   }
 
   /* the microphone: on the phone its recording goes to Lore's backend; the web preview shows a demo transcript.
