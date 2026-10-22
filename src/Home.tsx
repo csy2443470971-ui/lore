@@ -14,13 +14,14 @@ import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, u
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
+export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
   hidden: boolean; night: boolean;
   past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
   photos: Pic[]; groups: number[][]; setGroups: (g: number[][]) => void; onRemove: (idx: number[]) => void;
   said: Said[]; laid: number; placed?: Placed[]; moved?: Record<string, Pos>; making: boolean;
   live: string;                                      // Apple's live words while recording, in the installed app
   grammar: boolean;                                  // "Fix grammar" in settings, sent with each recording
+  voice: boolean;                                    // voice bars on the page, also a setting
   onCamera: () => void; onPick: () => void;
   onOpen: (p: 'archive' | 'settings') => void;
   onRecord: { start: () => Promise<boolean>; stop: () => Promise<string | null>; cancel: () => Promise<string | null> };
@@ -74,15 +75,15 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
 
   function stopDemo() { if (tick.current) clearInterval(tick.current); }
   /* on the phone: keep the recording, then send it; the raw words come back with the removed ones struck through, then settle */
-  function send(uri: string) {
+  function send(uri: string, took = 0) {
     setReal('tidy');
     keepRecording(uri).then((kept) => transcribe(kept, grammar).then((r) => {
       if (!r.text.trim()) { setReal('idle'); onNotice({ text: S.heardNothing }); return; }
       setHeard(r); setReal('show');
-      setTimeout(() => { onSaved({ kind: 'talk', text: r.text, audio: kept, g: grammar }); setReal('idle'); setHeard(null); }, 1500);
+      setTimeout(() => { onSaved({ kind: 'talk', text: r.text, audio: kept, g: grammar, at: Date.now() - took * 1000, secs: Math.round(took) }); setReal('idle'); setHeard(null); }, 1500);
     }).catch((e: unknown) => {
       setReal('idle');
-      onNotice({ text: `${S.notReached} (${String(e instanceof Error ? e.message : e).slice(0, 40)})`, action: { label: S.retry, run: () => send(kept) } });
+      onNotice({ text: `${S.notReached} (${String(e instanceof Error ? e.message : e).slice(0, 40)})`, action: { label: S.retry, run: () => send(kept, took) } });
     }));
   }
   function start() {
@@ -126,7 +127,8 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
         onRecord.cancel().then((uri) => { setReal('idle'); if (uri) onNotice({ text: S.discarded, action: { label: S.undo, run: () => send(uri) } }); });
         return;
       }
-      onRecord.stop().then((uri) => (uri ? send(uri) : setReal('idle')));
+      const took = secs;
+      onRecord.stop().then((uri) => (uri ? send(uri, took) : setReal('idle')));
       return;
     }
     stopDemo();
@@ -160,7 +162,7 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
   /* tap a line or a recording: edit its words with the keyboard */
   function edit(item: number, part: number) {
     const x = said[item];
-    if (!x || recording || making || select || ghost) return;
+    if (!x || x.kind === 'head' || recording || making || select || ghost) return;
     setDraft(x.kind === 'talk' ? x.text : x.parts[part]?.text ?? '');
     setEditing({ item, part });
   }
@@ -247,7 +249,7 @@ export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday,
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
-            preview={ghost && over ? { pics: ghost, ...over } : null}
+            preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice}
             onDrag={setDragging} onMove={onMove} onEdit={edit} /> : null}
 
           {showTray ? (

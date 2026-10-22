@@ -12,8 +12,9 @@ import { Newsreader_300Light, Newsreader_400Regular, Newsreader_400Regular_Itali
 import { Lang, STR } from './src/data';
 import { PHOTO } from './src/images';
 import { Day, removePhotos, Said } from './src/session';
-import { match } from './src/match';
-import { agentOn, fixText } from './src/agent';
+import { match, sentences } from './src/match';
+import { timeRules } from './src/sections';
+import { agentOn, fixText, sectionsOf } from './src/agent';
 import { dayKey, isDayKey, keepPhoto, loadDays, saveDay } from './src/store';
 import { useLive } from './src/live';
 import { dark as darkT, light as lightT } from './src/theme';
@@ -49,6 +50,7 @@ export default function App() {
   const [mode, setModeState] = useState<Mode>('auto');
   const [lang, setLangState] = useState<Lang>('zh');
   const [grammar, setGrammarState] = useState(true);   // "Fix grammar": on unless the person turns it off
+  const [voice, setVoiceState] = useState(true);       // voice bars at the top left of what was said
   const [pane, setPane] = useState<Pane>(null);
   const [today] = useState(() => dayKey());
   const [days, setDays] = useState<Record<string, Day>>(() => ({ [today]: { ...EMPTY, photos: SEED } }));
@@ -64,8 +66,9 @@ export default function App() {
   const via = useRef<'live' | 'audio'>('audio');      // which one is recording: Apple's recogniser, or expo-audio
 
   useEffect(() => {
-    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar']).then((kv) => {
+    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice']).then((kv) => {
       if (kv[2][1] === '0') setGrammarState(false);
+      if (kv[3][1] === '0') setVoiceState(false);
       const m = kv[0][1]; if (m === 'light' || m === 'dark' || m === 'auto') setModeState(m);
       const l = kv[1][1]; if (l === 'zh' || l === 'en') setLangState(l);
     }).catch(() => {});
@@ -73,6 +76,7 @@ export default function App() {
   const setMode = (m: Mode) => { setModeState(m); AsyncStorage.setItem('qd-mode', m).catch(() => {}); };
   const setLang = (l: Lang) => { setLangState(l); AsyncStorage.setItem('qd-lang', l).catch(() => {}); };
   const setGrammar = (g: boolean) => { setGrammarState(g); AsyncStorage.setItem('qd-grammar', g ? '1' : '0').catch(() => {}); };
+  const setVoice = (v: boolean) => { setVoiceState(v); AsyncStorage.setItem('qd-voice', v ? '1' : '0').catch(() => {}); };
 
   /* the days kept on the phone; the page waits for them, so nothing written first gets overwritten */
   useEffect(() => {
@@ -157,7 +161,7 @@ export default function App() {
   function editText(item: number, part: number, text: string) {
     update(cur, (d) => ({
       ...d,
-      said: d.said.map((x, i) => (i !== item ? x : x.kind === 'talk' ? { ...x, text, g: true }
+      said: d.said.map((x, i) => (i !== item || x.kind === 'head' ? x : x.kind === 'talk' ? { ...x, text, g: true }
         : { ...x, g: true, parts: x.parts.map((p, j) => (j === part ? { ...p, text, spoken: undefined } : p)) })),
     }));
   }
@@ -170,21 +174,40 @@ export default function App() {
     setMaking(true);
     const wait = new Promise((r) => setTimeout(r, 2000));
     const fixOne = (t: string) => (t.trim() ? fixText(t, true).catch(() => t) : Promise.resolve(t));
+    const said0 = d0.said.filter((x): x is Exclude<Said, { kind: 'head' }> => x.kind !== 'head');   // headings are found again each time
     const items: Said[] = agentOn && grammar
-      ? await Promise.all(d0.said.map(async (x): Promise<Said> => (x.g ? x : x.kind === 'talk'
+      ? await Promise.all(said0.map(async (x): Promise<Said> => (x.g ? x : x.kind === 'talk'
         ? { ...x, text: await fixOne(x.text), g: true }
         : { ...x, parts: await Promise.all(x.parts.map(async (p) => ({ ...p, text: await fixOne(p.text) }))), g: true })))
-      : d0.said;
+      : said0;
     /* a recording that names photos by number ("一号是…", "the picture one is…") is split into a part per photo, in code;
        a photo that already has its words keeps them, and a second mention stays plain text */
     const taken = new Set(items.flatMap((x) => (x.kind === 'photos' ? x.parts.flatMap((p) => p.unit.idx) : [])));
-    const said = items.flatMap((x): Said[] => {
+    const matched = items.flatMap((x): Said[] => {
       if (x.kind !== 'talk' || !count) return [x];
       const m = match(x.text, count);
       if (!m.parts.length) return [x];
       const parts = m.parts.map((p) => ({ ...p, unit: { idx: p.unit.idx.filter((i) => !taken.has(i)) } }));
       parts.forEach((p) => p.unit.idx.forEach((i) => taken.add(i)));
-      return [...(m.before ? [{ kind: 'talk' as const, text: m.before, g: x.g }] : []), { kind: 'photos' as const, parts, audio: x.audio, g: x.g }];
+      return [...(m.before ? [{ kind: 'talk' as const, text: m.before, g: x.g, audio: x.audio, at: x.at, secs: x.secs }] : []),
+        { kind: 'photos' as const, parts, g: x.g, ...(m.before ? {} : { audio: x.audio, at: x.at, secs: x.secs }) }];
+    });
+    /* the time-heading node: the day's sentences go out numbered, and each one that starts a new time of day
+       ("下午", "after lunch") gets a heading above it; a recording that crosses one is split there */
+    const sents = matched.map((x) => (x.kind === 'talk' ? sentences(x.text) : x.kind === 'photos' ? sentences(x.parts[0]?.text ?? '').slice(0, 1) : []));
+    const flat = sents.flatMap((ss, i) => ss.map((s, j) => ({ i, j, s })));
+    const found = agentOn ? await sectionsOf(flat.map((f) => f.s)).catch(() => timeRules(flat.map((f) => f.s))) : timeRules(flat.map((f) => f.s));
+    const join = (ss: string[]) => ss.reduce((a, s) => (!a ? s : a + (/[\u3400-\u9fff]/.test(a.slice(-1) + s[0]) ? '' : ' ') + s), '');
+    const said = matched.flatMap((x, i): Said[] => {
+      const hs = found.filter((h) => flat[h.sentence]?.i === i).map((h) => ({ j: flat[h.sentence].j, text: h.heading }));
+      if (!hs.length) return [x];
+      if (x.kind !== 'talk') return [{ kind: 'head', text: hs[0].text }, x];
+      const cuts = [...new Set([0, ...hs.map((h) => h.j)])].sort((a, b) => a - b);
+      return cuts.flatMap((c, k): Said[] => {
+        const text = join(sents[i].slice(c, cuts[k + 1] ?? sents[i].length)), h = hs.find((hh) => hh.j === c);
+        const part: Said = k === 0 ? { ...x, text } : { kind: 'talk', text, g: x.g };
+        return h ? [{ kind: 'head', text: h.text }, part] : [part];
+      });
     });
     await wait;
     const n = said.length;
@@ -251,14 +274,14 @@ export default function App() {
                   pageTitle={entry ? entry.t : dated.title} pageMeta={entry ? '' : dated.meta}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}
                   onRemove={(idx) => update(cur, (d) => removePhotos(d, idx))}
-                  said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} onCamera={shoot} onPick={pick} onOpen={setPane} onRecord={rec}
+                  said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} onCamera={shoot} onPick={pick} onOpen={setPane} onRecord={rec}
                   onSaved={(x) => update(cur, (d) => ({ ...d, said: [...d.said, x] }))} onLayout={layout} onNotice={setNotice}
                   placed={day.placed} moved={day.moved} onText={editText}
                   onPlace={(idx, at) => { const id = 'p' + Date.now().toString(36); update(cur, (d) => ({ ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } })); }}
                   onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))} />
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
-                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} />
+                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} />
                 <Toast notice={notice} onClose={closeNotice} />
               </>
             )}

@@ -60,7 +60,7 @@ const seedOf = (asset: number) => Object.keys(PHOTO).find((k) => PHOTO[k] === as
 /* sample photos are saved by name, since the bundle's asset numbers change between updates */
 function pack(d: Day): string {
   const photos = d.photos.map((p) => (p.file ? { file: p.file } : p.asset !== undefined ? { seed: seedOf(p.asset) } : { uri: p.uri }));
-  const said = d.said.map((x) => (x.kind === 'talk' && x.audio ? { ...x, audio: inside(x.audio) ?? x.audio } : x));
+  const said = d.said.map((x) => (x.kind !== 'head' && x.audio ? { ...x, audio: inside(x.audio) ?? x.audio } : x));
   return JSON.stringify({ photos, groups: d.groups, said, laid: d.laid, placed: d.placed, moved: d.moved });
 }
 function unpack(s: string): Day | null {
@@ -84,4 +84,7 @@ export async function loadDays(): Promise<Record<string, Day>> {
   }
   return out;
 }
+/* a recording's file, whether it was saved by its path inside Documents or (just recorded) in full */
+export const fileUri = (a: string) => (!native || /^[a-z]+:/.test(a) ? a : new File(Paths.document, a).uri);
+
 export const saveDay = (key: string, d: Day) => AsyncStorage.setItem(PREFIX + key, pack(d));
