@@ -14,6 +14,7 @@ import { PHOTO } from './src/images';
 import { Day, removePhotos, Said } from './src/session';
 import { match, sentences } from './src/match';
 import { timeRules } from './src/sections';
+import { join, shape } from './src/paragraphs';
 import { agentOn, fixText, sectionsOf } from './src/agent';
 import { dayKey, isDayKey, keepPhoto, loadDays, saveDay } from './src/store';
 import { useLive } from './src/live';
@@ -233,9 +234,9 @@ export default function App() {
        ("下午", "after lunch") gets a heading above it; a recording that crosses one is split there */
     const sents = matched.map((x) => (x.kind === 'talk' ? sentences(x.text) : x.kind === 'photos' ? sentences(x.parts[0]?.text ?? '').slice(0, 1) : []));
     const flat = sents.flatMap((ss, i) => ss.map((s, j) => ({ i, j, s })));
-    const found = agentOn ? await sectionsOf(flat.map((f) => f.s)).catch(() => timeRules(flat.map((f) => f.s))) : timeRules(flat.map((f) => f.s));
-    const join = (ss: string[]) => ss.reduce((a, s) => (!a ? s : a + (/[\u3400-\u9fff]/.test(a.slice(-1) + s[0]) ? '' : ' ') + s), '');
-    const said = matched.flatMap((x, i): Said[] => {
+    const offline = () => ({ sections: timeRules(flat.map((f) => f.s)), breaks: [] as number[] });
+    const { sections: found, breaks } = agentOn ? await sectionsOf(flat.map((f) => f.s)).catch(offline) : offline();
+    const headed = matched.flatMap((x, i): Said[] => {
       const hs = found.filter((h) => flat[h.sentence]?.i === i).map((h) => ({ j: flat[h.sentence].j, text: h.heading }));
       if (!hs.length) return [x];
       if (x.kind !== 'talk') return [{ kind: 'head', text: hs[0].text }, x];
@@ -246,6 +247,8 @@ export default function App() {
         return h ? [{ kind: 'head', text: h.text }, part] : [part];
       });
     });
+    /* then the paragraph rules (src/paragraphs.ts): long ones are cut, short ones join their neighbours */
+    const said = shape(headed, new Set(breaks.map((n) => flat[n]?.s).filter(Boolean)));
     await wait;
     const n = said.length;
     /* a photo now talked about leaves the spot it was dropped on and goes beside its words; where photos beside

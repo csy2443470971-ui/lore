@@ -230,10 +230,10 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, tit
   const para = (text: string, from: Src[]) => { paras.push(text); srcs.push(from); marks.push({ head, bar }); head = undefined; bar = undefined; };
   items.forEach((x, i) => {
     if (x.kind === 'head') { head = x.text; return; }
-    if (voice && x.audio) {
-      if (!open || (x.at && lastEnd && x.at - lastEnd >= 20 * 60 * 1000)) { open = { uris: [], secs: 0, at: x.at }; bar = open; }
-      open.uris.push(fileUri(x.audio)); open.secs += x.secs ?? 0;
-      if (x.at) lastEnd = x.at + (x.secs ?? 0) * 1000;
+    for (const r of voice ? [...(x.audio ? [{ audio: x.audio, at: x.at, secs: x.secs }] : []), ...(x.more ?? [])] : []) {
+      if (!open || (r.at && lastEnd && r.at - lastEnd >= 20 * 60 * 1000)) { open = { uris: [], secs: 0, at: r.at }; bar = open; }
+      open.uris.push(fileUri(r.audio)); open.secs += r.secs ?? 0;
+      if (r.at) lastEnd = r.at + (r.secs ?? 0) * 1000;
     }
     if (x.kind === 'talk') { if (x.text) para(x.text, [{ item: i, part: -1, from: 0 }]); return; }
     const tiles = x.parts.map((p, j) => ({ key: `${i}-${j}`, pics: p.unit.idx.map((k) => photos[k]).filter(Boolean) })).filter((tl) => tl.pics.length);
