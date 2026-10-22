@@ -1,22 +1,24 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActionSheetIOS, Alert, Animated, Dimensions, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Page, Stream } from './Doc';
 import { Tray } from './Photos';
-import { Pic, Said, unitsOf } from './session';
+import { Pic, Said, Unit, unitsOf } from './session';
 import { SZ } from './theme';
-import { Glow, RecState, Round, TalkKey, useFace, useLang, useS, useT, useTimer } from './ui';
+import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, useTimer } from './ui';
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ hidden, night, photos, groups, setGroups, said, laid, making, onCamera, onPick, onOpen, onRecord, onSaved, onLayout }: {
-  hidden: boolean; night: boolean; photos: Pic[]; groups: number[][]; setGroups: (g: number[][]) => void;
+export function Home({ hidden, night, past, title, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, making, onCamera, onPick, onOpen, onRecord, onSaved, onLayout, onNotice }: {
+  hidden: boolean; night: boolean;
+  past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
+  photos: Pic[]; groups: number[][]; setGroups: (g: number[][]) => void; onRemove: (idx: number[]) => void;
   said: Said[]; laid: number; making: boolean;
   onCamera: () => void; onPick: () => void;
   onOpen: (p: 'archive' | 'settings') => void;
-  onRecord: { start: () => void; stop: () => void; cancel: () => void };
-  onSaved: (s: Said) => void; onLayout: () => void;
+  onRecord: { start: () => Promise<boolean>; stop: () => void; cancel: () => void };
+  onSaved: (s: Said) => void; onLayout: () => void; onNotice: (n: Notice) => void;
 }) {
   const t = useT();
   const S = useS();
@@ -32,6 +34,7 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
   const [lines, setLines] = useState<Record<number, string>>({});
   const [select, setSelect] = useState(false);
   const [sel, setSel] = useState<number[]>([]);
+  const [dragging, setDragging] = useState(false);
   const secs = useTimer(rec !== 'idle');
   const fade = useState(() => new Animated.Value(1))[0];
   const tick = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -49,8 +52,10 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
   const raw = raws[said.filter((x) => x.kind === 'talk').length % raws.length];
   const line = (n: number) => S.demoLines[n % S.demoLines.length];
 
+  function stopDemo() { if (tick.current) clearInterval(tick.current); }
   function start() {
-    onRecord.start();
+    /* no microphone permission: stop quietly, the notice says why */
+    onRecord.start().then((ok) => { if (!ok) { stopDemo(); setRec('idle'); setShown(0); setK(-1); setLines({}); } });
     if (showTray && pending.length) {
       /* demo: the person goes "one is…, two is…"; which photo each sentence belongs to is only settled at Lay out */
       setMode('photos'); setLines({}); setK(pending[0]);
@@ -65,20 +70,43 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
       tick.current = setInterval(() => setShown((n) => Math.min(raw.length, n + 1)), 450);
     }
   }
-  function finish(keep: boolean) {
-    if (tick.current) clearInterval(tick.current);
-    setRec('idle');
-    if (!keep) { onRecord.cancel(); setShown(0); setK(-1); setLines({}); return; }
-    onRecord.stop();
+  const spoken = (u: Unit, text: string) => S.rangeWord(u.idx[0] + 1, u.idx[u.idx.length - 1] + 1, S.numWord) + S.is + text;
+  /* what this recording would become, whether it's kept now or brought back with Undo */
+  function result(): Said | null {
     if (mode === 'photos') {
       const all = k >= 0 ? { ...lines, [k]: line(k) } : lines;
-      onSaved({ kind: 'photos', parts: pending.filter((n) => all[n]).map((n) => ({ unit: units[n], text: all[n] })) });
-      setK(-1); setLines({});
+      const parts = pending.filter((n) => all[n]).map((n) => ({ unit: units[n], text: all[n], spoken: spoken(units[n], all[n]) }));
+      return parts.length ? { kind: 'photos', parts } : null;
+    }
+    const text = raw.slice(0, Math.max(shown, 4)).filter((w) => w[1] !== 1).map((w) => w[0]).join('');
+    return { kind: 'talk', text };
+  }
+  function finish(keep: boolean) {
+    stopDemo();
+    setRec('idle');
+    const r = result();
+    if (!keep) {
+      onRecord.cancel(); setShown(0); setK(-1); setLines({});
+      if (r) onNotice({ text: S.discarded, action: { label: S.undo, run: () => onSaved(r) } });
       return;
     }
+    onRecord.stop();
+    if (mode === 'photos') { if (r) onSaved(r); setK(-1); setLines({}); return; }
     setCleaned(true);            // the filler words drop out in place, then the words settle into the transcript
-    const text = raw.slice(0, Math.max(shown, 4)).filter((w) => w[1] !== 1).map((w) => w[0]).join('');
-    setTimeout(() => { onSaved({ kind: 'talk', text }); setShown(0); setCleaned(false); }, 900);
+    setTimeout(() => { if (r) onSaved(r); setShown(0); setCleaned(false); }, 900);
+  }
+  /* long-press a photo: delete it, or take a group apart */
+  function photoMenu(n: number) {
+    const u = units[n];
+    if (!u || recording) return;
+    const grp = u.idx.length > 1;
+    const opts = grp ? [S.ungroup, S.delGroup, S.cancel] : [S.delPhoto, S.cancel];
+    const pick = (b: number) => {
+      if (grp && b === 0) setGroups(groups.filter((g) => !g.includes(u.idx[0])));
+      else if ((grp && b === 1) || (!grp && b === 0)) onRemove(u.idx);
+    };
+    if (Platform.OS === 'ios') ActionSheetIOS.showActionSheetWithOptions({ options: opts, cancelButtonIndex: opts.length - 1, destructiveButtonIndex: grp ? 1 : 0 }, pick);
+    else Alert.alert('', '', opts.map((o, b) => ({ text: o, onPress: () => pick(b), style: b === opts.length - 1 ? 'cancel' : undefined })));
   }
   function toggle(i: number) { setSel((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i])); }
   function group() { if (sel.length < 2) return; setGroups([...groups, sel.slice().sort((a, b) => a - b)]); setSel([]); setSelect(false); }
@@ -105,10 +133,10 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
           <Text style={[h.makingT, { color: t.ink, fontFamily: face.body }]}>{S.making}</Text>
         </View>
       ) : (
-        <ScrollView ref={scroll} style={[StyleSheet.absoluteFill, { top: top + 50 }]} showsVerticalScrollIndicator={false}
+        <ScrollView ref={scroll} scrollEnabled={!dragging} style={[StyleSheet.absoluteFill, { top: top + 50 }]} showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
-          onContentSizeChange={() => { if (!select && !livePhotos && said.length) scroll.current?.scrollToEnd({ animated: true }); }}>
-          {laid > 0 ? <Page items={said.slice(0, laid)} photos={photos} /> : null}
+          onContentSizeChange={() => { if (!select && !livePhotos && !dragging && unlaid.length) scroll.current?.scrollToEnd({ animated: true }); }}>
+          {laid > 0 ? <Page items={said.slice(0, laid)} photos={photos} title={pageTitle} meta={pageMeta} onDrag={setDragging} /> : null}
 
           {showTray ? (
             <View style={{ gap: 10 }}>
@@ -118,7 +146,7 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
                   <Text style={{ fontSize: 13.5, color: select ? t.ink : t.mut, opacity: recording ? 0.35 : 1 }}>{select ? S.cancel : S.groupBtn}</Text>
                 </Pressable>
               </View>
-              <Tray photos={photos} groups={groups} width={W - 2 * SZ.px} select={select} sel={sel} onToggle={toggle} cur={-1} />
+              <Tray photos={photos} groups={groups} width={W - 2 * SZ.px} select={select} sel={sel} onToggle={toggle} onLong={photoMenu} cur={-1} />
               {select ? <Text style={[h.hint, { color: t.mut }]}>{S.selHow}</Text>
                 : !said.length && !recording ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>{S.photoHow}</Text> : null}
             </View>
@@ -148,7 +176,10 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
       {!making ? <LinearGradient colors={[t.b + '00', t.b]} locations={[0, 0.45]} style={[h.fadeOut, { height: listBottom }]} pointerEvents="none" /> : null}
 
       <View style={[h.tb, { top, backgroundColor: t.b }]}>
-        <Text style={[h.title, { color: t.ink, fontFamily: face.title }]}>{S.navToday}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
+          {past ? <Round icon="back" label={S.back} onPress={onToday} /> : null}
+          <Text numberOfLines={1} style={[past ? h.titleSm : h.title, { color: t.ink, fontFamily: face.title, flexShrink: 1 }]}>{title}</Text>
+        </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Round icon="cal" label={S.archive} onPress={() => onOpen('archive')} />
           <Round icon="gear" label={S.settings} onPress={() => onOpen('settings')} />
@@ -182,6 +213,7 @@ export function Home({ hidden, night, photos, groups, setGroups, said, laid, mak
 const h = StyleSheet.create({
   tb: { position: 'absolute', left: 0, right: 0, paddingLeft: SZ.px, paddingRight: SZ.px - 4, height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 22 },
+  titleSm: { fontSize: 18 },
   ask: { fontSize: 28, lineHeight: 38 },
   tx: { fontSize: 16, lineHeight: 29 },
   txEn: { fontSize: 17.5, lineHeight: 27 },

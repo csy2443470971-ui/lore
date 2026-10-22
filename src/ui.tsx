@@ -138,37 +138,75 @@ export function TalkKey({ left, right, onStart, onStop, onCancel, state, setStat
     }
     Animated.timing(pulse, { toValue: 1, duration: 200, useNativeDriver: true }).start();
   }, [state, pulse]);
-  function pressIn() {
+  const startY = useRef(0);
+  const armed = useRef(false);
+  const [cancelArmed, setCancelArmed] = useState(false);
+  function arm(on: boolean) {
+    if (armed.current === on) return;
+    armed.current = on; setCancelArmed(on);
+    Haptics.selectionAsync().catch(() => {});
+  }
+  function pressIn(y: number) {
     if (state === 'tap') return;            // the second tap ends on release
-    pressedAt.current = Date.now();
+    pressedAt.current = Date.now(); startY.current = y; arm(false);
     setState('pending'); onStart();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     holdTimer.current = setTimeout(() => setState('hold'), 280);
   }
+  /* while holding, sliding the finger up past the circle means "don't keep this one" */
+  function moveTo(y: number) { if (state === 'hold') arm(y - startY.current < -60); }
   function pressOut() {
     if (holdTimer.current) clearTimeout(holdTimer.current);
     if (state === 'tap') { onStop(); return; }
+    if (armed.current) { arm(false); onCancel(); return; }
     if (Date.now() - pressedAt.current < 280) { setState('tap'); return; }   // a quick tap: keep listening
     onStop();
   }
   const mm = `${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, '0')}`;
   const recording = state !== 'idle';
-  const under = state === 'tap' ? S.recTap(mm) : state === 'hold' ? S.recHold(mm) : S.tapOrHold;
+  const under = state === 'tap' ? S.recTap(mm) : state === 'hold' ? (cancelArmed ? S.releaseCancel : S.recHold(mm)) : S.tapOrHold;
   return (
     <View style={s.keyWrap}>
       <View style={s.keyRow}>
         {state === 'tap'
           ? <Round icon="close" label={S.cancel} size={SZ.key} onPress={onCancel} />
           : <Round icon={left.icon} label={left.label} size={SZ.key} onPress={recording ? undefined : left.onPress} dim={recording} />}
-        <Pressable onPressIn={pressIn} onPressOut={pressOut} accessibilityRole="button" accessibilityLabel={under} hitSlop={10}>
-          <View style={[s.circle, { backgroundColor: t.pill }]}>
-            <Animated.View style={[s.core, { backgroundColor: t.red, transform: [{ scale: pulse }] }]} />
-          </View>
-        </Pressable>
+        <View accessible accessibilityRole="button" accessibilityLabel={under} hitSlop={10}
+          onStartShouldSetResponder={() => true} onResponderTerminationRequest={() => false}
+          onResponderGrant={(e) => pressIn(e.nativeEvent.pageY)} onResponderMove={(e) => moveTo(e.nativeEvent.pageY)}
+          onResponderRelease={pressOut} onResponderTerminate={pressOut}
+          style={[s.circle, { backgroundColor: t.pill }]}>
+          <Animated.View style={[s.core, { backgroundColor: cancelArmed ? t.strike : t.red, transform: [{ scale: pulse }] }]} />
+        </View>
         <Round icon={right.icon} label={right.label} size={SZ.key} onPress={recording ? undefined : right.onPress} dim={recording} />
       </View>
-      <Text style={[s.under, { color: recording ? t.ink : t.mut }]}>{under}</Text>
+      <Text style={[s.under, { color: cancelArmed ? t.red : recording ? t.ink : t.mut }]}>{under}</Text>
     </View>
+  );
+}
+
+/* a short notice under the top bar, with at most one action (undo, open settings); it goes away by itself */
+export type Notice = { text: string; action?: { label: string; run: () => void } } | null;
+export function Toast({ notice, onClose }: { notice: Notice; onClose: () => void }) {
+  const t = useT();
+  const ins = useSafeAreaInsets();
+  const o = useState(() => new Animated.Value(0))[0];
+  useEffect(() => {
+    if (!notice) return;
+    Animated.timing(o, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+    const id = setTimeout(() => Animated.timing(o, { toValue: 0, duration: 220, useNativeDriver: true }).start(onClose), 4500);
+    return () => clearTimeout(id);
+  }, [notice, o, onClose]);
+  if (!notice) return null;
+  return (
+    <Animated.View style={[s.toast, { top: ins.top + 62, backgroundColor: t.pill, opacity: o }]}>
+      <Text style={{ color: t.pillText, fontSize: 14, flexShrink: 1 }}>{notice.text}</Text>
+      {notice.action ? (
+        <Pressable hitSlop={10} onPress={() => { notice.action?.run(); onClose(); }}>
+          <Text style={{ color: t.pillText, fontSize: 14, fontWeight: '600' }}>{notice.action.label}</Text>
+        </Pressable>
+      ) : null}
+    </Animated.View>
   );
 }
 
@@ -193,5 +231,6 @@ export const s = StyleSheet.create({
   keyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 },
   circle: { width: SZ.talk, height: SZ.talk, borderRadius: SZ.talk / 2, alignItems: 'center', justifyContent: 'center' },
   core: { width: 22, height: 22, borderRadius: 11 },
+  toast: { position: 'absolute', alignSelf: 'center', maxWidth: '88%', flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 11, paddingHorizontal: 18, borderRadius: 22 },
   under: { fontSize: 12.5, height: 18, fontVariant: ['tabular-nums'] },
 });

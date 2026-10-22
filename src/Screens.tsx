@@ -47,19 +47,20 @@ function Tag({ k }: { k: Kind }) {
 }
 
 /* ---------- look back: the month first, then everything written, each one labelled ---------- */
-export function Archive({ open, onClose, onEntry, onInsights }: { open: boolean; onClose: () => void; onEntry: () => void; onInsights: () => void }) {
+export function Archive({ open, onClose, onEntry, onInsights }: { open: boolean; onClose: () => void; onEntry: (i: number) => void; onInsights: () => void }) {
   const t = useT();
   const S = useS();
   const face = useFace();
   const ins = useSafeAreaInsets();
   const [kind, setKind] = useState<'all' | Kind>('all');
+  const byDay = (d: number) => S.entries.findIndex((e) => e.day === d);
   const cells: React.ReactNode[] = [];
   for (let b = 0; b < 3; b++) cells.push(<View key={'b' + b} style={a.cell} />);
   for (let d = 1; d <= 31; d++) {
     const m = MONTH_MIN[d - 1] ?? 0, fut = d > 17, today = d === 17;
     const size = m ? Math.min(26, 8 + m * 2.2) : 3;
     cells.push(
-      <Pressable key={d} disabled={!m} onPress={onEntry} style={a.cell}>
+      <Pressable key={d} disabled={byDay(d) < 0} onPress={() => onEntry(byDay(d))} style={a.cell}>
         <Text style={[a.cn, { color: today ? t.red : fut ? t.strike : t.mut, fontWeight: today ? '600' : '400' }]}>{d}</Text>
         <View style={a.dotBox}>
           {!fut && <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: m ? t.ink : t.gray }} />}
@@ -68,7 +69,7 @@ export function Archive({ open, onClose, onEntry, onInsights }: { open: boolean;
       </Pressable>
     );
   }
-  const list = S.entries.filter((e) => kind === 'all' || e.k === kind);
+  const list = S.entries.map((e, i) => ({ e, i })).filter(({ e }) => kind === 'all' || e.k === kind);
   return (
     <Panel open={open} onBack={onClose} top={<><Round icon="back" label={S.back} onPress={onClose} /><Text style={[us.topLbl, { color: t.ink }]}>{S.look}</Text><View style={{ width: 36 }} /></>}>
       <ScrollView contentContainerStyle={{ padding: SZ.px, paddingTop: 24, paddingBottom: ins.bottom + 40 }} showsVerticalScrollIndicator={false}>
@@ -88,8 +89,8 @@ export function Archive({ open, onClose, onEntry, onInsights }: { open: boolean;
           <Text style={[a.sec, { color: t.ink, fontFamily: face.title }]}>{S.written}</Text>
           <Seg value={kind} onChange={setKind} options={[['all', S.kAll], ['day', S.kDay], ['three', S.kThree], ['week', S.kWeek]]} />
         </View>
-        {list.map((e, i) => (
-          <Pressable key={i} onPress={onEntry} style={[a.ent, { backgroundColor: t.b }]}>
+        {list.map(({ e, i }) => (
+          <Pressable key={i} onPress={() => onEntry(i)} style={[a.ent, { backgroundColor: t.b }]}>
             <View style={{ flex: 1, gap: 4 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Tag k={e.k} />
