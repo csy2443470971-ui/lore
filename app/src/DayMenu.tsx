@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SZ } from './theme';
 import { useFace, useT } from './ui';
@@ -7,7 +7,8 @@ import { useFace, useT } from './ui';
 /* the menu under the title: today, yesterday, the day before and this week. A small red dot marks a day that
    has something written; the one open now is set in bold */
 export type DayOpt = { key: string; label: string; date: string; has: boolean };
-export function DayMenu({ opts, cur, onPick, onClose }: { opts: DayOpt[]; cur: string; onPick: (key: string) => void; onClose: () => void }) {
+/* heading: a question above the list (choosing which day a page belongs to); long lists scroll */
+export function DayMenu({ opts, cur, heading, onPick, onClose }: { opts: DayOpt[]; cur: string; heading?: string; onPick: (key: string) => void; onClose: () => void }) {
   const t = useT();
   const top = useSafeAreaInsets().top + 58;            // just under the title bar
   const face = useFace();
@@ -15,6 +16,8 @@ export function DayMenu({ opts, cur, onPick, onClose }: { opts: DayOpt[]; cur: s
     <View style={StyleSheet.absoluteFill}>
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="close" />
       <View style={[m.card, { top, backgroundColor: t.panel }]}>
+        {heading ? <Text style={[m.heading, { color: t.mut }]}>{heading}</Text> : null}
+        <ScrollView style={{ maxHeight: 46 * 7.5 }} bounces={false}>
         {opts.map((o, i) => (
           <Pressable key={o.key} onPress={() => onPick(o.key)} style={({ pressed }) => [m.row, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.gray }, pressed && { opacity: 0.6 }]}>
             <View style={[m.dot, { backgroundColor: o.has ? t.red : 'transparent' }]} />
@@ -22,6 +25,7 @@ export function DayMenu({ opts, cur, onPick, onClose }: { opts: DayOpt[]; cur: s
             <Text style={[m.date, { color: t.mut }]}>{o.date}</Text>
           </Pressable>
         ))}
+        </ScrollView>
       </View>
     </View>
   );
@@ -31,6 +35,7 @@ const m = StyleSheet.create({
   card: { position: 'absolute', left: SZ.px - 6, width: 250, borderRadius: 18, paddingVertical: 4, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, height: 46 },
   dot: { width: 6, height: 6, borderRadius: 3 },
+  heading: { fontSize: 12.5, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6 },
   label: { fontSize: 16, flex: 1 },
   date: { fontSize: 13 },
 });

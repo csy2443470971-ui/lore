@@ -14,10 +14,11 @@ import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, u
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ hidden, night, past, title, onTitle, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
+export function Home({ hidden, night, past, title, onTitle, onDate, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onNotice }: {
   hidden: boolean; night: boolean;
   past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
   onTitle?: () => void;                              // the title opens the menu of days
+  onDate?: () => void;                               // the page's date: choose which day it belongs to
   photos: Pic[]; groups: number[][]; setGroups: (g: number[][]) => void; onRemove: (idx: number[]) => void;
   said: Said[]; laid: number; placed?: Placed[]; moved?: Record<string, Pos>; making: boolean;
   live: string;                                      // Apple's live words while recording, in the installed app
@@ -251,7 +252,7 @@ export function Home({ hidden, night, past, title, onTitle, pageTitle, pageMeta,
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
-            preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent}
+            preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent} onTitle={recording ? undefined : onDate}
             onDrag={setDragging} onMove={onMove} onEdit={edit} /> : null}
 
           {showTray ? (

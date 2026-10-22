@@ -65,6 +65,7 @@ export default function App() {
   const [days, setDays] = useState<Record<string, Day>>(() => ({ [today]: { ...EMPTY, photos: SEED } }));
   const [cur, setCur] = useState(today);             // a date, 'week' for this week, or 'e<n>' for a sample entry from Look back
   const [menu, setMenu] = useState(false);
+  const [picking, setPicking] = useState(false);       // choosing which day the page belongs to
   const [ready, setReady] = useState(false);
   const saved = useRef<Record<string, Day>>({});
   const [making, setMaking] = useState(false);
@@ -193,6 +194,30 @@ export default function App() {
       setNotice({ text: S.dragHint });
       AsyncStorage.setItem('qd-tip-drag', '1').catch(() => {});
     }).catch(() => {});
+  }
+
+  /* the page belongs to another day: everything on it moves there, after what that day already has. Photo numbers,
+     groups, placed photos and where photos were dragged all move along; this day is left empty */
+  function moveDay(from: string, to: string) {
+    if (from === to) return;
+    setDays((all) => {
+      const src = all[from] ?? EMPTY, dst = all[to] ?? EMPTY, off = dst.photos.length, n = dst.said.length;
+      const re = (idx: number[]) => idx.map((i) => i + off);
+      const said = src.said.map((x): Said => (x.kind === 'photos' ? { ...x, parts: x.parts.map((p) => ({ ...p, unit: { idx: re(p.unit.idx) } })) } : x));
+      const moved = Object.fromEntries(Object.entries(src.moved ?? {}).map(([k, v]) => [/^\d+-\d+$/.test(k) ? k.replace(/^\d+/, (i) => String(Number(i) + n)) : k, v]));
+      const allLaid = dst.laid === dst.said.length;
+      return {
+        ...all,
+        [from]: { ...EMPTY },
+        [to]: {
+          photos: [...dst.photos, ...src.photos], groups: [...dst.groups, ...src.groups.map(re)], said: [...dst.said, ...said],
+          laid: allLaid ? n + src.laid : dst.laid,
+          placed: [...(dst.placed ?? []), ...(src.placed ?? []).map((p) => ({ ...p, idx: re(p.idx) }))],
+          moved: { ...dst.moved, ...moved },
+        },
+      };
+    });
+    setCur(to);
   }
 
   /* an edited recording, or an edited caption of one photo; emptied words stay as an empty entry, so nothing else moves */
@@ -329,7 +354,7 @@ export default function App() {
                     labelOf={(k) => `${dateTitle(k, lang).meta} · ${dateTitle(k, lang).title}`} />
                 ) : (
                 <Home key={cur} hidden={pane !== null} night={h >= 18 || h < 5}
-                  past={!!entry} title={entry ? entry.when : nameOf(cur)} onTitle={entry ? undefined : () => setMenu(true)} onToday={() => setCur(today)}
+                  past={!!entry} title={entry ? entry.when : nameOf(cur)} onTitle={entry ? undefined : () => setMenu(true)} onDate={entry ? undefined : () => setPicking(true)} onToday={() => setCur(today)}
                   pageTitle={entry ? entry.t : dated.title} pageMeta={entry ? '' : dated.meta}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}
                   onRemove={(idx) => update(cur, (d) => removePhotos(d, idx))}
@@ -340,6 +365,10 @@ export default function App() {
                   onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))} />
                 )}
                 {menu ? <DayMenu opts={menuOpts} cur={cur} onPick={(k) => { setMenu(false); setCur(k); }} onClose={() => setMenu(false)} /> : null}
+                {picking ? (
+                  <DayMenu heading={S.whichDay} cur={cur} onClose={() => setPicking(false)} onPick={(k) => { setPicking(false); moveDay(cur, k); }}
+                    opts={Array.from({ length: 14 }, (_, i) => shift(today, -i)).map((k) => ({ key: k, label: `${dateTitle(k, lang).title}  ${dateTitle(k, lang).meta}`, date: k === today ? S.navToday : k === yest ? S.navYesterday : '', has: has(k) }))} />
+                ) : null}
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
                 <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} />
