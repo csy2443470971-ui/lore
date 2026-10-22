@@ -1,0 +1,69 @@
+{
+  "expo": {
+    "name": "Lore",
+    "slug": "quiet-journal",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "app.quietjournal.ios",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "按住红点说话时，用麦克风录下你的声音。"
+      },
+      "runtimeVersion": "exposdk:57.0.0"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "app.quietjournal",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-image",
+      "expo-font",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "按住红点说话时，用麦克风录下你的声音。"
+        }
+      ],
+      "expo-asset",
+      "expo-status-bar",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "选照片放进今天的日记。",
+          "cameraPermission": "拍一张照片放进今天的日记。"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "559a7d77-59e4-4b1c-89fc-eeaf9ca4c885"
+      }
+    },
+    "owner": "siennachen",
+    "updates": {
+      "url": "https://u.expo.dev/559a7d77-59e4-4b1c-89fc-eeaf9ca4c885"
+    }
+  }
+}
