@@ -1,0 +1,10 @@
+{
+  "name": "lore-agent",
+  "private": true,
+  "type": "module",
+  "description": "Lore's model pipeline: the fix-the-stutter node, its checks, and a model comparison",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0",
+    "zod": "^4.6.7"
+  }
+}

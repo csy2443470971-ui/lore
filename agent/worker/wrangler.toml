@@ -1,0 +1,12 @@
+# Lore's backend: transcription, the fix-the-stutter node and the layout director.
+# Keys are Worker secrets (wrangler secret put …); none of them live in the app or in this repo.
+name = "lore-agent"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# at most 20 requests a minute from one address
+[[ratelimits]]
+name = "LIMIT"
+namespace_id = "2611"
+simple = { limit = 20, period = 60 }
