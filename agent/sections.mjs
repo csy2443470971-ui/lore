@@ -15,7 +15,12 @@ If there is none, return {"sections": []}.`;
 
 /* a second, separate call (so it can't disturb the headings): where the speaker turns to a different subject.
    These are only places a paragraph may start; the paragraph rules in the app decide */
-export const TOPICS_SYSTEM = `You read a spoken journal entry, its sentences numbered from 0, and mark where the speaker turns to a different subject: a new event, place, person or train of thought. Leave out small turns within one subject. Return JSON: {"breaks": [n, ...]} with the numbers of the sentences that start a new subject, or {"breaks": []}.`;
+export const TOPICS_SYSTEM = `You read a spoken journal entry, its sentences numbered from 0, and mark where the speaker moves on to a different subject, so the entry can be cut into paragraphs there.
+- A new subject: the speaker starts telling about a new event, place, person or thing ("Then we went to the market", "There was a guy who…", "说到小林，她最近…").
+- Not a new subject: a sentence that continues, explains, comments on or wraps up what came just before it, even when it starts with "and", "but", "so", "then", or is only a short closing remark ("That was fun.", "真的很累。"). A thought spread over several sentences is one subject.
+- Mark every real turn, and nothing else. Spoken entries ramble, so most sentences are not turns. Never mark sentence 0.
+Return JSON: {"breaks": [n, ...]}, the numbers of the sentences that start a new subject, or {"breaks": []}.
+Example. Sentences: 0 We drove up on Saturday morning. 1 The road was empty and it was foggy. 2 So we got there early. 3 My sister had booked a cabin by the lake. 4 It had a tiny kitchen and no wifi. 5 On Sunday we hiked to the waterfall. 6 It was beautiful, honestly. Answer: {"breaks": [3, 5]}`;
 
 export const sectionsMessages = (sentences) => [
   { role: 'user', content: sentences.map((s, i) => `${i}. ${s}`).join('\n') },
