@@ -15,6 +15,8 @@ export const EASE = Easing.bezier(0.22, 1, 0.36, 1);
 
 /* the Chinese face chosen in Settings (see fonts.ts) */
 export const FontCtx = createContext<{ body: string; title: string }>({ body: F.cn, title: F.cnMed });
+/* the chosen Chinese face itself, for diary text, whatever language the app is in */
+export const useCn = () => useContext(FontCtx);
 /* Reading face per language: the chosen Chinese face for Chinese, Newsreader for English. */
 export function useFace() {
   const zh = useLang() === 'zh';

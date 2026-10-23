@@ -4,7 +4,8 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Pic } from './session';
 import { F } from './theme';
-import { Round, Text, useFace, useLang, useS, useT } from './ui';
+import { isCJK, mixed } from './Doc';
+import { Round, Text, useCn, useFace, useLang, useS, useT } from './ui';
 
 /* capturing a view needs react-native-view-shot's native side, which only the newly installed app has; an app installed
    before it still runs this same update, without the button doing more than saying so */
@@ -64,7 +65,9 @@ function Card({ fmt, tone, day, title, meta, paras, pics }: { fmt: Fmt; tone: To
   const span = day.startsWith('r-');
   const words = paras.map((p) => (zh ? '　　' + p : p)).join('\n');
   const face = useFace();
-  const body = zh ? { fontFamily: face.body, fontSize: 14, lineHeight: 25 } : { fontFamily: F.serif, fontSize: 15.5, lineHeight: 23 };
+  const cn = useCn();
+  /* the words in the same faces as on the page, whatever language the app is in */
+  const body = { fontSize: 14, lineHeight: 25 };
   /* the photos take what the words leave: the words' lines are estimated, then the photos get the rest, within bounds */
   const inner = CW - 2 * pad, perLine = inner / (zh ? body.fontSize : body.fontSize * 0.47);
   const need = paras.reduce((n, p) => n + Math.ceil(((zh ? 2 : 0) + p.length) / perLine), 0) * body.lineHeight;
@@ -87,7 +90,7 @@ function Card({ fmt, tone, day, title, meta, paras, pics }: { fmt: Fmt; tone: To
         ) : (
           <View style={{ gap: 4 }}>
             <View style={[k.dot, { backgroundColor: c.red }]} />
-            <Text style={[k.spanT, { color: c.ink, fontFamily: zh ? face.body : F.serif }]}>{title}</Text>
+            <Text style={[k.spanT, { color: c.ink, fontFamily: isCJK(title) ? cn.title : F.serif }]}>{title}</Text>
             {meta ? <Text style={[k.small, { color: c.mut }]}>{meta}</Text> : null}
           </View>
         )}
@@ -95,7 +98,7 @@ function Card({ fmt, tone, day, title, meta, paras, pics }: { fmt: Fmt; tone: To
       {pics.length ? <View style={{ marginTop: 20 }}><Prints pics={pics} w={CW - 2 * pad} h={photoH} /></View> : null}
       <View style={{ flex: 1, marginTop: words ? (pics.length ? 18 : 22) : 0, overflow: 'hidden' }}
         onLayout={(e) => setLines(Math.max(1, Math.floor(e.nativeEvent.layout.height / body.lineHeight)))}>
-        {words && lines ? <Text numberOfLines={lines} style={[body, { color: c.ink, textAlign: 'justify' }]}>{words}</Text> : null}
+        {words && lines ? <Text numberOfLines={lines} style={[body, { color: c.ink, textAlign: 'justify' }]}>{mixed(words, body.fontSize, cn.body)}</Text> : null}
       </View>
       <View style={[k.foot, { borderTopColor: c.rule }]}>
         <Image source={c.mark} contentFit="contain" style={{ width: 52, height: 14.5 }} />

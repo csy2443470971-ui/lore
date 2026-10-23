@@ -15,7 +15,7 @@ import { Lang, STR } from './src/data';
 import { PHOTO } from './src/images';
 import { Day, Pos, removePhotos, Said, Sticker } from './src/session';
 import { match, sentences } from './src/match';
-import { timeRules } from './src/sections';
+import { sectionize, timeRules } from './src/sections';
 import { join, shape } from './src/paragraphs';
 import { agentOn, fixText, readPage, sectionsOf } from './src/agent';
 import { dayKey, isDayKey, isSpanKey, keepPhoto, loadDays, loadMine, relative, saveDay, saveMine } from './src/store';
@@ -576,7 +576,8 @@ export default function App() {
       });
     });
     /* then the paragraph rules (src/paragraphs.ts): long ones are cut, short ones join their neighbours */
-    const said = shape(headed, new Set(breaks.map((n) => flat[n]?.s).filter(Boolean)));
+    /* each paragraph in its part of the day, by a time word it opens with or the time it was said (src/sections.ts) */
+    const said = shape(sectionize(headed), new Set(breaks.map((n) => flat[n]?.s).filter(Boolean)));
     await wait;
     const n = said.length;
     /* a photo now talked about leaves the spot it was dropped on and goes beside its words; where photos beside

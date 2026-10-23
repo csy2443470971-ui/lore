@@ -6,7 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import Re, { Easing, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
-import { Fluid, Page, PageApi, pieces, shapeOf, soloFor, Stream } from './Doc';
+import { Fluid, isCJK, LATIN, mixed, Page, PageApi, pieces, shapeOf, soloFor, Stream } from './Doc';
 import { ShareSheet } from './Share';
 import { StickerBox } from './StickerBox';
 import { Viewer } from './Viewer';
@@ -14,8 +14,8 @@ import { Lift, src, Tray } from './Photos';
 import { agentOn, Heard, marked, transcribe } from './agent';
 import { Pic, Placed, Pos, Said, Sticker, Unit, unitsOf } from './session';
 import { keepRecording } from './store';
-import { SZ } from './theme';
-import { Glow, Notice, RecState, Round, TalkKey, Text, TextInput, useFace, useLang, useS, useT, useTimer } from './ui';
+import { F, SZ } from './theme';
+import { Glow, Notice, RecState, Round, TalkKey, Text, TextInput, useCn, useFace, useLang, useS, useT, useTimer } from './ui';
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -53,6 +53,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const t = useT();
   const S = useS();
   const face = useFace();
+  const cn = useCn();
   const zh = useLang() === 'zh';
   const ins = useSafeAreaInsets();
   const W = Dimensions.get('window').width;
@@ -428,7 +429,11 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const ctlBottom = ins.bottom + 30;
   const ctlH = SZ.talk + 28;
   const listBottom = ctlBottom + ctlH + (canLayout || canRelayout ? 96 : 30);
-  const tx = [zh ? h.tx : h.txEn, { color: t.ink, fontFamily: face.body }];
+  /* diary text is set by script whatever language the app is in (see Doc's isCJK): Chinese in the chosen face, the rest in
+     Newsreader; a field being typed in takes the face of what is in it */
+  const tx = [h.tx, { color: t.ink }];
+  const inFace = (v: string) => (isCJK(v) || (!/[A-Za-z]/.test(v) && zh) ? { fontFamily: cn.body } : { fontFamily: F.serif, fontSize: h.tx.fontSize * LATIN });
+  const run = (w: string) => (isCJK(w) ? { fontFamily: cn.body } : { fontFamily: F.serif, fontSize: h.tx.fontSize * LATIN });
   const reached = livePhotos ? pending.filter((n) => lines[n] || n === k) : [];
   const binAt = { x: W / 2, y: Dimensions.get('window').height - ctlBottom - ctlH / 2 };   // the bin sits where the talk key is
   const tray = photos.length ? (
@@ -477,18 +482,18 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           {unlaid.length ? <Stream items={unlaid} onEdit={(i, part) => edit(laid + i, part)} /> : null}
 
           {livePhotos && reached.length ? <Stream items={[{ kind: 'photos', parts: reached.map((n) => ({ unit: units[n], text: lines[n] || line(n), spoken: spoken(units[n], lines[n] || line(n)) })) }]} /> : null}
-          {(real === 'listen' || real === 'tidy') && live ? <Text style={tx}>{live}</Text> : null}
+          {(real === 'listen' || real === 'tidy') && live ? <Text style={tx}>{mixed(live, h.tx.fontSize, cn.body)}</Text> : null}
           {real === 'tidy' ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>✦ {S.cleaning}</Text> : null}
           {real === 'show' && heard ? (
             <Text style={tx}>
-              {marked(heard.raw, heard.tidied ?? heard.text).map(([w, kept], i) => <Text key={i} style={kept ? null : { color: t.strike, textDecorationLine: 'line-through' }}>{w}</Text>)}
+              {marked(heard.raw, heard.tidied ?? heard.text).map(([w, kept], i) => <Text key={i} style={[run(w), kept ? null : { color: t.strike, textDecorationLine: 'line-through' }]}>{w}</Text>)}
             </Text>
           ) : null}
           {liveTalk ? (
             <Text style={tx}>
               {raw.slice(0, shown).map((w, i) => {
                 if (w[1] === 1 && cleaned) return null;
-                return <Text key={i} style={w[1] === 1 ? { color: t.strike, textDecorationLine: 'line-through' } : null}>{w[0]}</Text>;
+                return <Text key={i} style={[run(w[0]), w[1] === 1 ? { color: t.strike, textDecorationLine: 'line-through' } : null]}>{w[0]}</Text>;
               })}
             </Text>
           ) : null}
@@ -496,10 +501,10 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           {typing !== null ? (
             <TextInput value={typing} onChangeText={setTyping} multiline autoFocus scrollEnabled={false} selectionColor={t.red}
               placeholder={S.writeHint} placeholderTextColor={t.mut} onBlur={finishTyping}
-              style={[zh ? h.tx : h.txEn, { color: t.ink, fontFamily: face.body, padding: 0, minHeight: 60 }]} />
+              style={[h.tx, { color: t.ink, padding: 0, minHeight: 60 }, inFace(typing)]} />
           ) : null}
           {/* once the page is laid out, every photo of the day stays here at the foot of it, small and numbered */}
-          {laid > 0 ? tray : null}
+          {laid > 0 && tray ? <View style={[h.foot, { borderTopColor: t.gray }]}>{tray}</View> : null}
           {/* the rest of the page: a tap anywhere here starts writing */}
           {!recording && !making && !select && !choosing && !carried && typing === null ? (
             <Pressable onPress={() => setTyping('')} style={{ minHeight: 260 }} accessibilityLabel={S.writeHint} />
@@ -620,7 +625,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
             </View>
             {/* not editable, so no keyboard; the words can still be selected with the system's handles, then copied or shared */}
             <TextInput value={reading} editable={false} multiline scrollEnabled selectionColor={t.red}
-              style={[zh ? h.tx : h.txEn, h.input, { color: t.ink, fontFamily: face.body }]} />
+              style={[h.tx, h.input, { color: t.ink }, inFace(reading)]} />
           </View>
         </View>
       ) : null}
@@ -634,7 +639,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
               <Pressable hitSlop={10} onPress={saveEdit}><Text style={{ fontSize: 15, color: t.ink, fontWeight: '600' }}>{S.editDone}</Text></Pressable>
             </View>
             <TextInput value={draft} onChangeText={setDraft} multiline autoFocus selectionColor={t.red}
-              style={[zh ? h.tx : h.txEn, h.input, { color: t.ink, fontFamily: face.body }]} />
+              style={[h.tx, h.input, { color: t.ink }, inFace(draft)]} />
           </View>
         </KeyboardAvoidingView>
       ) : null}
@@ -649,8 +654,8 @@ const h = StyleSheet.create({
   titleBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   caret: { fontSize: 13, marginTop: 3 },
   ask: { fontSize: 28, lineHeight: 38 },
-  tx: { fontSize: 16, lineHeight: 29 },
-  txEn: { fontSize: 17.5, lineHeight: 27 },
+  tx: { fontSize: 16, lineHeight: 28 },
+  foot: { marginTop: 28, paddingTop: 22, borderTopWidth: StyleSheet.hairlineWidth },   // the thumbnails sit apart from the diary, under a hairline
   trayHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   hint: { fontSize: 13.5, lineHeight: 21 },
   making: { alignItems: 'center', justifyContent: 'center', gap: 12, paddingBottom: 80 },
