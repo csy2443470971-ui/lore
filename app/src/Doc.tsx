@@ -155,14 +155,14 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
         if (fl.p > pi) continue;
         let a = Infinity, b = -Infinity;
         /* a little more than the line itself is looked at, so the edge of the words eases around the sticker's shape
-           instead of stepping in and out line by line */
+           instead of stepping in and out line by line; the words come close to it (6 points), as close as to a photo */
         for (const pt of fl.pts) {
           const yy = tops[fl.p] + pt.y;
-          if (yy >= ly - lh * 0.35 && yy <= ly + lh * 1.35) { if (pt.x < a) a = pt.x; if (pt.x > b) b = pt.x; }
+          if (yy >= ly - lh * 0.15 && yy <= ly + lh * 1.15) { if (pt.x < a) a = pt.x; if (pt.x > b) b = pt.x; }
         }
         if (a > b) continue;
         near = true;
-        a -= PAD; b += PAD;
+        a -= 6; b += 6;
         /* the words go down the wider side only, so a line never jumps across the sticker mid-sentence */
         segs = segs.flatMap(([s, f]): [number, number][] => {
           if (b <= s || a >= f) return [[s, f]];
@@ -243,7 +243,10 @@ function Fluid({ pics }: { pics: Pic[] }) {
    corner, between a quarter of the page and all of it). While it is held the page hears where it is, a few times a
    frame at most, and makes room for it; let go, it settles into the place the words left for it. When the words move
    it (another photo was dragged, the page was laid out again) it glides to its new place. */
-function Movable({ id, r, z, W, locked, block, grab, move, drop, open, children }: {
+const Movable = React.memo(MovableIn, (a, b) => a.id === b.id && a.r.x === b.r.x && a.r.y === b.r.y && a.r.w === b.r.w && a.r.h === b.r.h
+  && a.z === b.z && a.W === b.W && a.locked === b.locked && a.block === b.block && a.pk === b.pk && a.grab === b.grab && a.move === b.move && a.drop === b.drop && !!a.open === !!b.open);
+function MovableIn({ id, r, z, W, locked, block, grab, move, drop, open, children }: {
+  pk: string;                                      // which photos it shows: it redraws only when these or its place change
   id: string; r: Rect; z: number; W: number; locked?: boolean; block?: React.RefObject<unknown>;
   grab: (id: string) => void; move: (id: string, x: number, y: number, w: number) => void; drop: () => void;
   open?: (id: string) => void;                     // a tap opens the photo full screen
@@ -332,7 +335,9 @@ function Movable({ id, r, z, W, locked, block, grab, move, drop, open, children 
    moves it, two make it bigger or smaller and turn it; carried onto the bin, it comes off. Let go, its new place is kept.
    One just put on lands with a small bounce. */
 type Spot2 = { x: number; y: number; w: number; r: number };
-function Stuck({ st, top, W, source, slap, locked, bin, block, place, carry, slide, tap }: {
+const Stuck = React.memo(StuckIn, (a, b) => a.st === b.st && a.top === b.top && a.W === b.W && a.slap === b.slap && a.locked === b.locked
+  && a.bin?.x === b.bin?.x && a.bin?.y === b.bin?.y && a.block === b.block && a.place === b.place && a.carry === b.carry && a.slide === b.slide && a.tap === b.tap);
+function StuckIn({ st, top, W, source, slap, locked, bin, block, place, carry, slide, tap }: {
   st: Sticker; top: number; W: number; source: number | { uri: string }; slap: boolean; locked?: boolean;
   bin?: { x: number; y: number };                 // the bin's centre on the screen
   block?: React.RefObject<unknown>;
@@ -669,9 +674,10 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   const held = useRef({ w: 0, h: 0 });
   /* the words reflow only when the photo's place really changes (its paragraph, line, or some points across), at most once a frame */
   const shown = useRef('');
-  /* While a photo is held the words don't move at all: the space it was lifted from stays, and a thin outline follows
-     the finger to show where it will land. Only when it is let go do the words reflow, once. Reflowing while it was
-     held (on every line the finger crossed, or whenever it rested) is what made dragging jump about. */
+  /* While a photo is held the words make room for it as it goes, in real time: each time its place changes (a line,
+     or a side) the page reflows on the next frame, and a thin outline marks the place. Only the lines that move are
+     redrawn, and photos and stickers whose place didn't change aren't touched, so this keeps up with the finger. */
+  const frame = useRef(0);
   const land = useMemo(() => bus<Rect | null>(), []);
   const place = useCallback((id: string, at: Pos, h: number) => {
     last.current = { id, at };
@@ -680,6 +686,8 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     shown.current = sig;
     const { starts: ss } = tied.current, n = linesFor(h);
     land.emit({ x: at.x, y: (ss[at.p ?? 0] ?? 0) + (at.k ?? 0) * lh + e, w: at.w ?? 0, h: n * lh - 2 * e });
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lh, e, land]);
   const grab = useCallback((id: string) => {
@@ -701,6 +709,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     place(id, { x: Math.round(side), y, p: sp.p, k: sp.k, w: ww }, h);
   }, [W, lh, size, place]);
   const drop = useCallback(() => {
+    cancelAnimationFrame(frame.current);
     land.emit(null);
     const lt = last.current;
     if (lt) { setLive((s) => ({ ...s, [lt.id]: lt.at })); moveTo.current(lt.id, lt.at); }
@@ -824,7 +833,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
         {lines.map(setLine)}
         <Landing hook={land} color={t.mut} />
         {tiles.map((tl) => (
-          <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop} open={onOpen ? openTile : undefined}>
+          <Movable key={tl.key} id={tl.key} pk={tl.pics.map((pc) => pc.file ?? pc.uri ?? pc.asset).join('|')} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop} open={onOpen ? openTile : undefined}>
             {tl.pics.length > 1 ? <Fluid pics={tl.pics} />
               : <Image source={src(tl.pics[0])} contentFit="cover" style={[StyleSheet.absoluteFill, { borderRadius: 8 }]} />}
           </Movable>
