@@ -28,14 +28,17 @@ function useTx() {
 
 /* Before layout: only the tidied words, in the order they were said. Photos aren't matched to sentences yet;
    the spoken numbers ("one is…") stay in the text and are matched to photos at Lay out. Tap a recording to edit it. */
-export function Stream({ items, onEdit }: { items: Said[]; onEdit?: (i: number) => void }) {
+export function Stream({ items, onEdit }: { items: Said[]; onEdit?: (i: number, part: number) => void }) {
   const S = useS();
   const tx = useTx();
   return (
     <View style={{ gap: 16 }}>
       {items.map((x, i) => (x.kind === 'head' || (x.kind === 'talk' && !x.text) ? null : (
-        <Text key={i} style={tx} onPress={onEdit && x.kind === 'talk' ? () => onEdit(i) : undefined}>
-          {x.kind === 'talk' ? x.text : x.parts.map((p) => p.spoken ?? p.text).join(S.is === '是' ? '' : ' ')}
+        <Text key={i} style={tx} onPress={onEdit && x.kind === 'talk' ? () => onEdit(i, -1) : undefined}>
+          {/* a recording that names photos is made of one stretch per photo: each can be tapped on its own to edit it */}
+          {x.kind === 'talk' ? x.text : x.parts.map((p, j) => (
+            <Text key={j} onPress={onEdit ? () => onEdit(i, j) : undefined}>{j && S.is !== '是' ? ' ' : ''}{p.spoken ?? p.text}</Text>
+          ))}
         </Text>
       )))}
     </View>
