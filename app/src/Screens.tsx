@@ -108,8 +108,10 @@ function MonthCal({ has, onDay, onEntry }: { has?: (key: string) => boolean; onD
   );
   const years = Array.from({ length: 6 }, (_, i) => ty - 5 + i);
   return (
-    <>
-      <View style={a.hRow}>
+    <View>
+      {/* a tap anywhere else on the month closes the list of years */}
+      {pick === 'year' ? <Pressable style={[StyleSheet.absoluteFill, { zIndex: 9 }]} onPress={() => setPick(null)} accessibilityLabel={S.cancel} /> : null}
+      <View style={[a.hRow, { zIndex: 10 }]}>
         <Pressable onPress={() => setPick(pick === 'month' ? null : 'month')} hitSlop={8} style={a.hBtn}>
           <Text style={[zh ? a.h3 : a.h3en, { color: t.ink, fontFamily: face.title }]}>{S.months[month.m - 1]}</Text>
           <Text style={[a.caret, { color: t.mut }]}>▾</Text>
@@ -118,14 +120,21 @@ function MonthCal({ has, onDay, onEntry }: { has?: (key: string) => boolean; onD
           <Text style={{ fontSize: 14, color: pick === 'year' ? t.ink : t.mut }}>{zh ? `${month.y} 年` : String(month.y)}</Text>
           <Text style={[a.caret, { color: t.mut }]}>▾</Text>
         </Pressable>
+        {/* the years: a small list dropping down from the year, over the month */}
+        {pick === 'year' ? (
+          <View style={[a.yearMenu, { backgroundColor: t.panel }]}>
+            {years.slice().reverse().map((y) => (
+              <Pressable key={y} onPress={() => { setMonth({ y, m: y === ty ? Math.min(month.m, tm) : month.m }); setPick(null); }}
+                style={({ pressed }) => [a.yearRow, { opacity: pressed ? 0.6 : 1 }]}>
+                <Text style={{ fontSize: 14.5, color: y === month.y ? t.ink : t.mut, fontWeight: y === month.y ? '600' : '400' }}>{zh ? `${y} 年` : String(y)}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
       </View>
       {pick === 'month' ? (
         <View style={a.pick}>
           {S.months.map((label, i) => chip(i, label, i + 1 === month.m, month.y === ty && i + 1 > tm, () => { setMonth({ y: month.y, m: i + 1 }); setPick(null); }))}
-        </View>
-      ) : pick === 'year' ? (
-        <View style={a.pick}>
-          {years.map((y) => chip(y, zh ? `${y} 年` : String(y), y === month.y, false, () => { setMonth({ y, m: y === ty ? Math.min(month.m, tm) : month.m }); setPick(null); }))}
         </View>
       ) : (
         <GestureDetector gesture={swipe}>
@@ -135,7 +144,7 @@ function MonthCal({ has, onDay, onEntry }: { has?: (key: string) => boolean; onD
           </Re.View>
         </GestureDetector>
       )}
-    </>
+    </View>
   );
 }
 
@@ -372,6 +381,8 @@ const a = StyleSheet.create({
   hBtn: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   caret: { fontSize: 12 },
   pick: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 18 },
+  yearMenu: { position: 'absolute', right: -6, top: 30, width: 112, borderRadius: 14, paddingVertical: 6, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
+  yearRow: { height: 38, paddingHorizontal: 16, justifyContent: 'center' },
   pickCell: { width: '33.333%', height: 52, alignItems: 'center', justifyContent: 'center' },
   pickChip: { height: 40, minWidth: 84, paddingHorizontal: 14, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   h3: { fontSize: 26, lineHeight: 36 },

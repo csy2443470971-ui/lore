@@ -331,16 +331,16 @@ export const soloFor = (r: number, w: number): Rect => {
   return { x: 0, y: 0, w: ww, h: Math.round(ww * r) };
 };
 
-/* Photos between two paragraphs sit in rows of up to three, centred: they keep their shapes and the size they have
-   beside the words (one height for the row, their sizes' average), smaller only when they wouldn't fit across the
-   page. A photo put between two paragraphs never suddenly grows. */
+/* Photos between two paragraphs sit in rows of up to three, centred: they keep their shapes and the size they had as
+   they were carried there, or were given there with two fingers (one height for the row, their sizes' average), smaller
+   only when they wouldn't fit across the page. A photo put between two paragraphs never suddenly grows. */
 const GT = 6;
-function rowOf(rs: number[], W: number) {
-  const sum = rs.reduce((a, r) => a + 1 / r, 0);
-  const own = rs.reduce((a, r) => a + soloFor(r, W).h, 0) / rs.length;
-  const h = Math.round(Math.min(own, (W - GT * (rs.length - 1)) / sum));
-  const ws = rs.map((r) => Math.round(h / r));
-  const total = ws.reduce((a, b) => a + b, 0) + GT * (rs.length - 1);
+function rowOf(items: { r: number; w?: number }[], W: number) {
+  const sum = items.reduce((a, x) => a + 1 / x.r, 0);
+  const own = items.reduce((a, x) => a + (x.w ? x.w * x.r : soloFor(x.r, W).h), 0) / items.length;
+  const h = Math.round(Math.min(own, (W - GT * (items.length - 1)) / sum));
+  const ws = items.map((x) => Math.round(h / x.r));
+  const total = ws.reduce((a, b) => a + b, 0) + GT * (items.length - 1);
   return { h, ws, x0: Math.round((W - total) / 2) };
 }
 /* the gap between two paragraphs the finger is in (0 before the first, the count after the last), or -1 when it is over
@@ -384,7 +384,7 @@ function MovableIn({ id, r, slot, z, W, locked, block, grab, move, drop, open, t
   id: string; r: Rect; z: number; W: number; locked?: boolean; block?: React.RefObject<unknown>;
   grab: (id: string) => void; drop: () => void;
   /* where it is held: the finger on the page, the point of the photo it holds (as fractions), the width the person gave
-     it, and the finger on the screen (-1 when it didn't move) */
+     it, and the finger on the screen (-1 when it didn't move, -2 when it was only resized: it stays where it is) */
   move: (id: string, gx: number, gy: number, fx: number, fy: number, want: number, sy: number, sx: number) => void;
   open?: (id: string) => void;                     // a tap opens the photo full screen
   children: React.ReactNode;
@@ -481,7 +481,7 @@ function MovableIn({ id, r, slot, z, W, locked, block, grab, move, drop, open, t
       .onUpdate((e) => {
         const s0 = size.get(), nw = Math.max(W * 0.25, Math.min(W, s0.w * e.scale));
         want.set(nw); w.set(nw); h.set(s0.h * nw / s0.w);
-        report(-1);
+        report(-2);                                // a resize: the photo stays where it is
       })
       .onFinalize(() => end(2));
     const tap = Gesture.Tap().maxDuration(600).maxDistance(12).onEnd((_e, ok) => { if (ok) scheduleOnRN(onOpen, id); });
@@ -493,7 +493,7 @@ function MovableIn({ id, r, slot, z, W, locked, block, grab, move, drop, open, t
     if (!far.get().w) far.set({ w: w.get(), h: h.get() });
     const f = far.get(), nw = Math.max(W * 0.25, Math.min(W, f.w * s));
     want.set(nw); w.set(nw); h.set(f.h * nw / f.w);
-    scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), nw, -1, -1);
+    scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), nw, -2, -1);
   }, [id, W]);
   /* the page scrolled by itself under it: it moves down the page as far, so it stays under the finger */
   useAnimatedReaction(() => shove.get(), (s, prev) => {
@@ -819,6 +819,8 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   const live = liveSt.of === moved ? liveSt.at : {};
   const pos: Record<string, Pos> = { ...moved, ...live };
   const movedNow = useRef(moved);
+  const posNow = useRef<Record<string, Pos>>({});   // every photo's place as the page shows it now (read in the gesture handlers)
+  useEffect(() => { posNow.current = pos; });
   useEffect(() => { movedNow.current = moved; });
   const setLive = useCallback((f: (s: Record<string, Pos>) => Record<string, Pos>) => {
     const of = movedNow.current;
@@ -850,12 +852,12 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   const assemble = (skip?: string) => {
     const blocks: { spot: Spot; ch: number; tiles: { key: string; pics: Pic[]; r: Rect }[] }[] = [];
     const singles: { key: string; pics: Pic[]; w: number; h: number; at: Pos }[] = [];
-    const betw = new Map<number, (Tile & { o: number })[]>();
+    const betw = new Map<number, (Tile & { o: number; w?: number })[]>();
     const below: Record<number, number> = {};
     const putBetween = (tl: Tile, at: Pos) => {
       const b = Math.max(0, Math.min(at.b ?? 0, paras.length));
       if (!betw.has(b)) betw.set(b, []);
-      betw.get(b)!.push({ ...tl, o: at.o ?? 0 });
+      betw.get(b)!.push({ ...tl, o: at.o ?? 0, w: at.w });
     };
     const single = (tl: Tile, at: Pos) => {
       const w = at.w ?? soloFor(tl.ratio, W).w;
@@ -900,12 +902,12 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       if (pa.b !== undefined) putBetween(tile, pa); else single(tile, pa);
     }
     /* the rows between paragraphs: up to three photos to a row, in their order */
-    const brow = new Map<number, { items: (Tile & { o: number })[]; h: number; ws: number[]; x0: number }[]>();
+    const brow = new Map<number, { items: (Tile & { o: number; w?: number })[]; h: number; ws: number[]; x0: number }[]>();
     const rowsAt: number[] = Array(paras.length + 1).fill(0);
     for (const [b, list] of betw) {
       list.sort((a, c) => a.o - c.o);
       const rs = [];
-      for (let i = 0; i < list.length; i += 3) { const items = list.slice(i, i + 3); rs.push({ items, ...rowOf(items.map((x) => x.ratio), W) }); }
+      for (let i = 0; i < list.length; i += 3) { const items = list.slice(i, i + 3); rs.push({ items, ...rowOf(items.map((x) => ({ r: x.ratio, w: x.w })), W) }); }
       brow.set(b, rs);
       rowsAt[b] = rs.reduce((a, r) => a + r.h, 0) + GT * (rs.length - 1) + gap;
     }
@@ -1017,7 +1019,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       cancelAnimationFrame(frame.current);
       frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
     };
-    if (at.b !== undefined && last.current?.at.b !== at.b) waiting.current = { sig, timer: setTimeout(go, 150) };
+    if (at.b !== undefined && last.current?.at.b !== at.b && posNow.current[id]?.b !== at.b) waiting.current = { sig, timer: setTimeout(go, 150) };
     else go();
   }, [setLive]);
   const grab = useCallback((id: string) => {
@@ -1056,7 +1058,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       at = Math.min(at, list.length);
       const prev = list[at - 1]?.o, next = list[at]?.o;
       const o = prev === undefined && next === undefined ? 0 : prev === undefined ? next! - 1 : next === undefined ? prev + 1 : (prev + next) / 2;
-      place(id, { x: 0, y: 0, b, o });
+      place(id, { x: 0, y: 0, b, o, w: Math.round(w) });   // the size it has as it is carried
       return;
     }
     /* beside the words the photo is where the finger has it, and the words go around it there as it moves (in steps of
@@ -1089,11 +1091,20 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       if (st !== bn.state) { bn.state = st; if (over) Haptics.selectionAsync().catch(() => {}); bn.show?.(st); }
     }
     const pinched = hd.w > 0 && Math.abs(want - hd.w) >= 0.5;
-    const ww = pinched ? Math.round(want) : hd.from || !hd.w ? soloFor(hd.r, W).w : hd.w;
+    /* the size it has as it is carried, wherever it goes: as it was, or as two fingers made it */
+    const ww = pinched ? Math.round(want) : hd.w || soloFor(hd.r, W).w;
+    /* only resized: it keeps its place (in its row, or beside the same line, against the same edge) */
+    const cur = posNow.current[id];
+    if (sy === -2 && cur && (cur.b !== undefined || cur.p !== undefined)) {
+      const ow = cur.w ?? hd.w;
+      const x = cur.b !== undefined ? 0 : cur.x >= W - ow - 1 ? Math.max(0, W - ww) : Math.min(cur.x, Math.max(0, W - ww));
+      place(id, { ...cur, x, w: ww });
+      return;
+    }
     const hh = ww * hd.r;
     decide(id, gx - fx * ww, gy - fy * hh, ww, hh, gx, gy);
     if (sy >= 0) edge.current?.(sy);
-  }, [W, decide]);
+  }, [W, decide, place]);
   const drop = useCallback(() => {
     cancelAnimationFrame(frame.current);
     setHolding(null);
