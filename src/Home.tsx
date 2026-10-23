@@ -1,15 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActionSheetIOS, Alert, Animated, Dimensions, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActionSheetIOS, Alert, Animated, Dimensions, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
-import { Page, pieces, solo, Stream } from './Doc';
+import Re, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { Fluid, Page, PageApi, pieces, shapeOf, soloFor, Stream } from './Doc';
 import { ShareSheet } from './Share';
 import { StickerBox } from './StickerBox';
 import { Viewer } from './Viewer';
-import { Mosaic, src, Tray } from './Photos';
+import { Lift, src, Tray } from './Photos';
 import { agentOn, Heard, marked, transcribe } from './agent';
 import { Pic, Placed, Pos, Said, Sticker, Unit, unitsOf } from './session';
 import { keepRecording } from './store';
@@ -51,7 +52,9 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const zh = useLang() === 'zh';
   const ins = useSafeAreaInsets();
   const W = Dimensions.get('window').width;
+  const top = ins.top + 8;
   const [rec, setRec] = useState<RecState>('idle');
+  const recording = rec !== 'idle';
   const [mode, setMode] = useState<'talk' | 'photos'>('talk');
   const [shown, setShown] = useState(0);
   const [cleaned, setCleaned] = useState(false);
@@ -84,12 +87,18 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const [viewing, setViewing] = useState<{ idx: number[]; at: number; pics?: Pic[]; only?: 'cut' } | null>(null);   // a photo open full screen          // a paragraph opened to select (and copy) its words
   const [bin, setBin] = useState<'on' | 'over' | null>(null);           // a sticker is being carried: the bin shows in the talk key's place
   const [draft, setDraft] = useState('');
-  const lift = useRef<{ u: Unit; moved: boolean; carried: boolean } | null>(null);   // a tray photo picked up by a long press
-  const [ghost, setGhost] = useState<Pic[] | null>(null);
-  const [over, setOver] = useState<{ x: number; y: number } | null>(null);   // the carried photo over the page: the words already move for it
-  const box = useRef<{ x: number; y: number; w: number; h: number } | null>(null);   // the page's text area on screen, measured when a photo is lifted
-  const ghostXY = useState(() => new Animated.ValueXY())[0];
-  const g = solo(W - 2 * SZ.px);                                   // a dropped photo takes the size of a single photo on the page
+  /* A photo lifted from the thumbnails at the bottom: it is drawn by the screen at the finger (shared values, moved on
+     the screen's own thread, so it follows smoothly whatever the page is doing), and tells the page where it is; the page
+     makes room, and on a drop says where the photo lands, and the photo glides there. */
+  const pageApi = useRef<PageApi | null>(null);
+  const gx = useSharedValue(0), gy = useSharedValue(0), gw = useSharedValue(64), gh = useSharedValue(64), gop = useSharedValue(0);
+  const [carried, setCarried] = useState<Pic[] | null>(null);          // the photos being carried
+  const held = useRef<{ u: Unit; moved: boolean; box: { x: number; y: number; w: number; h: number } | null; y0: number; sx: number; sy: number; fx: number; fy: number; sz: { w: number; h: number } } | null>(null);
+  const scrollY = useRef(0);
+  const sized = useRef({ content: 0, view: 0 });
+  const auto = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pageW = W - 2 * SZ.px;
+  const ghostStyle = useAnimatedStyle(() => ({ left: gx.get() - gw.get() / 2, top: gy.get() - gh.get() / 2, width: gw.get(), height: gh.get(), opacity: gop.get() * 0.96 }));
 
   useEffect(() => { Animated.timing(fade, { toValue: hidden ? 0 : 1, duration: 360, useNativeDriver: true }).start(); }, [hidden, fade]);
   useEffect(() => () => { if (tick.current) clearInterval(tick.current); }, []);
@@ -99,18 +108,18 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   useEffect(() => {
     if (shownDay.current === day) return;
     shownDay.current = day;
-    setK(-1); setLines({}); setSelect(false); setSel([]); setEditing(null); setGhost(null); setOver(null); setChoosing(null); setSharing(false); setStickerBox(false);
+    setK(-1); setLines({}); setSelect(false); setSel([]); setEditing(null); setCarried(null); gop.set(0); held.current = null; setChoosing(null); setSharing(false); setStickerBox(false);
     scroll.current?.scrollTo({ y: 0, animated: false });
     turn.setValue(0.25);
     Animated.timing(turn, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-  }, [day, turn]);
+  }, [day, turn, gop]);
 
   const units = unitsOf(photos.length, groups);
   const talked = new Set(said.flatMap((x) => (x.kind === 'photos' ? x.parts.map((p) => p.unit.idx[0]) : [])));
   const laidIdx = new Set(said.slice(0, laid).flatMap((x) => (x.kind === 'photos' ? x.parts.map((p) => p.unit.idx[0]) : [])));
   const pending = units.map((u, n) => (talked.has(u.idx[0]) ? -1 : n)).filter((n) => n >= 0);
-  const onPage = new Set([...laidIdx, ...(placed ?? []).map((p) => p.idx[0])]);
-  const showTray = units.some((u) => !onPage.has(u.idx[0]));
+  const used = new Set([...laidIdx, ...(placed ?? []).map((p) => p.idx[0])]);   // the photos that are on the page
+  const showTray = units.some((u) => !used.has(u.idx[0]));                       // some photo is not on the page yet
   const raws = [S.raw, S.raw2, S.raw3];
   const raw = raws[said.filter((x) => x.kind === 'talk').length % raws.length];
   const line = (n: number) => S.demoLines[n % S.demoLines.length];
@@ -204,7 +213,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   /* tap a line or a recording: edit its words with the keyboard */
   function edit(item: number, part: number) {
     const x = said[item];
-    if (!x || x.kind === 'head' || recording || making || select || ghost) return;
+    if (!x || x.kind === 'head' || recording || making || select || carried) return;
     setDraft(x.kind === 'talk' ? x.text : x.parts[part]?.text ?? '');
     setEditing({ item, part });
   }
@@ -213,53 +222,110 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
     setEditing(null);
   }
 
-  /* long-press a photo in the tray: with a page to drop it on, it lifts and follows the finger;
-     let go without moving and the menu opens instead (delete, ungroup) */
-  function liftPhoto(u: Unit, x: number, y: number) {
+  /* the size a photo (or a group) has on the page */
+  const sizeOf = (u: Unit) => (u.idx.length > 1 ? soloFor(1, pageW) : soloFor(shapeOf(photos[u.idx[0]]?.r), pageW));
+  const GS = { damping: 22, stiffness: 260, mass: 0.6 };
+  function stopAuto() { if (auto.current) clearInterval(auto.current); auto.current = null; }
+  /* the finger on the screen, as the carried photo's top-left on the page (the page may have scrolled since the lift),
+     or null when it is off the page */
+  function onPage(x: number, y: number) {
+    const l = held.current, b = l?.box;
+    if (!l || !b) return null;
+    const px = x - b.x, py = y - b.y + (scrollY.current - l.y0);
+    if (px < -24 || px > b.w + 24 || py < -24 || py > b.h + 90) return null;
+    return { x: px - l.sz.w / 2, y: py - l.sz.h / 2 };
+  }
+  function sendCarry() {
+    const l = held.current;
+    if (!l) return;
+    const at = onPage(l.fx, l.fy);
+    pageApi.current?.carry(at ? { x: at.x, y: at.y, w: l.sz.w, h: l.sz.h } : null, l.u.idx);
+  }
+  /* near the top or bottom of the page the page scrolls by itself, so a photo can be carried a long way */
+  function startAuto() {
+    stopAuto();
+    auto.current = setInterval(() => {
+      const l = held.current;
+      if (!l || !scroll.current) return;
+      const topEdge = top + 50 + 70, botEdge = Dimensions.get('window').height - 190;
+      let dy = 0;
+      if (l.fy < topEdge) dy = -Math.min(16, (topEdge - l.fy) / 5);
+      else if (l.fy > botEdge) dy = Math.min(16, (l.fy - botEdge) / 5);
+      if (!dy) return;
+      const next = Math.max(0, Math.min(Math.max(0, sized.current.content - sized.current.view), scrollY.current + dy));
+      if (next === scrollY.current) return;
+      scrollY.current = next;
+      scroll.current.scrollTo({ y: next, animated: false });
+      sendCarry();
+    }, 16);
+  }
+  function endCarry() {
+    stopAuto();
+    held.current = null;
+    pageApi.current?.carry(null);
+    setDragging(false);
+  }
+  const fadeGhost = () => { gop.set(withTiming(0, { duration: 140 })); setTimeout(() => setCarried(null), 160); };
+  /* the long press took hold of a thumbnail: with a page to drop it on, it lifts (grows from the thumbnail to the size
+     it has on the page, under the finger); without one, the menu opens (delete, take a group apart) */
+  function liftStart(u: Unit, x: number, y: number, tile: number) {
     if (recording || select) return;
     if (!laid) { photoMenu(u); return; }
-    lift.current = { u, moved: false, carried: false };
-    ghostXY.setValue({ x: x - g.w / 2, y: y - g.h / 2 });
-    setGhost(u.idx.map((i) => photos[i]));
+    const sz = sizeOf(u);
+    held.current = { u, moved: false, box: null, y0: scrollY.current, sx: x, sy: y, fx: x, fy: y, sz: { w: sz.w, h: sz.h } };
+    setCarried(u.idx.map((i) => photos[i]));
+    gw.set(tile); gh.set(tile); gop.set(1);
+    gw.set(withSpring(sz.w, GS)); gh.set(withSpring(sz.h, GS));
     setDragging(true);
-    box.current = null;
-    area.current?.measureInWindow((ax, ay, aw, ah) => { box.current = { x: ax, y: ay, w: aw, h: ah }; });
+    area.current?.measureInWindow((ax, ay, aw, ah) => { if (held.current) { held.current.box = { x: ax, y: ay, w: aw, h: ah }; sendCarry(); } });
+    startAuto();
     Haptics.selectionAsync().catch(() => {});
   }
-  function endLift() { lift.current = null; setGhost(null); setOver(null); setDragging(false); }
-  /* the finger came up while the tray still had it: no move means the menu; a move the page scroll took means nothing */
-  function releasePhoto() {
-    setTimeout(() => {
-      const l = lift.current;
-      if (!l || l.carried) return;
-      endLift();
-      if (!l.moved) photoMenu(l.u);
-    }, 0);
+  function liftMove(x: number, y: number) {
+    const l = held.current;
+    if (!l) return;
+    l.fx = x; l.fy = y;
+    if (Math.abs(x - l.sx) + Math.abs(y - l.sy) > 8) l.moved = true;
+    sendCarry();
   }
-  /* where the carried photo would land on the page, in the page's own coordinates; null when the finger is off the page */
-  function onPageAt(x: number, y: number) {
-    const b = box.current;
-    if (!b || x < b.x - 24 || x > b.x + b.w + 24 || y < b.y - 24 || y > b.y + b.h + 80) return null;
-    return { x: Math.max(0, Math.min(b.w - g.w, x - b.x - g.w / 2)), y: Math.max(0, y - b.y - g.h / 2) };
+  /* let go: over the page, the photo glides to the place the page made for it and stays there; off the page it fades;
+     without having moved, the menu opens */
+  function liftEnd(x: number, y: number) {
+    const l = held.current;
+    if (!l) return;
+    l.fx = x; l.fy = y;
+    const at = onPage(x, y) ? pageApi.current?.landing() : null;
+    const b = l.box;
+    if (at && b) {
+      const lx = b.x + at.rect.x, ly = b.y + at.rect.y - (scrollY.current - l.y0);
+      gx.set(withSpring(lx + at.rect.w / 2, GS)); gy.set(withSpring(ly + at.rect.h / 2, GS));
+      gw.set(withSpring(at.rect.w, GS)); gh.set(withSpring(at.rect.h, GS));
+      onPlace(l.u.idx, at.at);
+      endCarry();
+      setTimeout(fadeGhost, 240);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      return;
+    }
+    const u = l.u, moved = l.moved;
+    endCarry();
+    fadeGhost();
+    if (!moved) photoMenu(u);
   }
-  /* dropped over the page: it stays where the words already made room for it */
-  function dropAt(x: number, y: number) {
-    const l = lift.current, at = onPageAt(x, y);
-    endLift();
-    if (!l || !at) return;
-    onPlace(l.u.idx, at);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  /* the touch was taken away */
+  function liftStop() {
+    if (!held.current) return;
+    endCarry();
+    fadeGhost();
   }
-  function carryTo(x: number, y: number) {
-    ghostXY.setValue({ x: x - g.w / 2, y: y - g.h / 2 });
-    /* the words make room only when where it would land moves by a few points, not on every touch event */
-    const at = onPageAt(x, y);
-    setOver((o) => (!at || !o ? at : Math.abs(at.x - o.x) < 6 && Math.abs(at.y - o.y) < 6 ? o : at));
-  }
-  const handlers = useRef({ dropAt, endLift, carryTo });
-  useEffect(() => { handlers.current = { dropAt, endLift, carryTo }; });
-  const take = useCallback(() => { if (!lift.current) return false; lift.current.moved = true; return true; }, []);
-  const hold = useCallback(() => { if (lift.current) lift.current.carried = true; }, []);
+  /* the thumbnails get stable callbacks that reach the latest ones through a ref */
+  const lifter = useRef({ start: liftStart, move: liftMove, end: liftEnd, stop: liftStop });
+  useEffect(() => { lifter.current = { start: liftStart, move: liftMove, end: liftEnd, stop: liftStop }; });
+  const lift = useMemo<Lift>(() => ({
+    gx, gy,
+    start: (u, x, y, tile) => lifter.current.start(u, x, y, tile), move: (x, y) => lifter.current.move(x, y),
+    end: (x, y) => lifter.current.end(x, y), stop: () => lifter.current.stop(),
+  }), [gx, gy]);
+  useEffect(() => stopAuto, []);
   /* a long press on a paragraph offers to join it to the one above */
   const choose = (key: string) => setChoosing((c) => {
     const next = new Set(c ?? []);
@@ -285,25 +351,35 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
     onSaved({ kind: 'talk', text, at: Date.now(), g: true });
     Haptics.selectionAsync().catch(() => {});
   }
-  const scrolled = useCallback(() => { if (lift.current) lift.current.moved = true; }, []);
-  const follow = useCallback((x: number, y: number) => handlers.current.carryTo(x, y), []);
-  const letGo = useCallback((x: number, y: number) => handlers.current.dropAt(x, y), []);
-  const putBack = useCallback(() => handlers.current.endLift(), []);
 
-  const recording = rec !== 'idle';
   const liveTalk = mode === 'talk' && (recording || shown > 0);
   const livePhotos = mode === 'photos' && recording;
   const unlaid = said.slice(laid);
   const nothing = !said.length && !photos.length && !liveTalk && !making && real === 'idle';
   const canLayout = unlaid.length > 0 && !recording && !shown && !making && !select && real === 'idle';
-  const canRelayout = laid > 0 && !unlaid.length && !recording && !shown && !making && !select && real === 'idle' && !ghost && !choosing && !bin;   // a laid-out day can be laid out again
-  const top = ins.top + 8;
+  const canRelayout = laid > 0 && !unlaid.length && !recording && !shown && !making && !select && real === 'idle' && !carried && !choosing && !bin;   // a laid-out day can be laid out again
   const ctlBottom = ins.bottom + 30;
   const ctlH = SZ.talk + 28;
   const listBottom = ctlBottom + ctlH + (canLayout || canRelayout ? 96 : 30);
   const tx = [zh ? h.tx : h.txEn, { color: t.ink, fontFamily: face.body }];
   const reached = livePhotos ? pending.filter((n) => lines[n] || n === k) : [];
   const binAt = { x: W / 2, y: Dimensions.get('window').height - ctlBottom - ctlH / 2 };   // the bin sits where the talk key is
+  const tray = photos.length ? (
+    <View style={{ gap: 10 }}>
+      <View style={h.trayHead}>
+        <Text style={{ fontSize: 13, color: t.mut }}>
+          {select ? S.selN(sel.length) : laid > 0 || past ? S.nPhotos(photos.length, groups.length) : groups.length ? S.photosOfG(photos.length, groups.length) : S.photosOf(photos.length)}
+        </Text>
+        <Pressable disabled={recording} hitSlop={8} onPress={() => { setSelect(!select); setSel([]); }}>
+          <Text style={{ fontSize: 13.5, color: select ? t.ink : t.mut, opacity: recording ? 0.35 : 1 }}>{select ? S.cancel : S.groupBtn}</Text>
+        </Pressable>
+      </View>
+      <Tray photos={photos} groups={groups} used={used} width={pageW} select={select} sel={sel} onToggle={toggle} onOpen={(idx) => setViewing({ idx, at: 0 })} lift={lift} />
+      {select ? <Text style={[h.hint, { color: t.mut }]}>{S.selHow}</Text>
+        : laid > 0 && showTray ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>{S.dragHow}</Text>
+          : !said.length && !recording ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>{S.photoHow}</Text> : null}
+    </View>
+  ) : null;
 
   return (
     <Animated.View pointerEvents={hidden ? 'none' : 'box-none'} style={[StyleSheet.absoluteFill, { opacity: fade }]}>
@@ -314,32 +390,21 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           <Text style={[h.makingT, { color: t.ink, fontFamily: face.body }]}>{S.making}</Text>
         </View>
       ) : (
-        <Carry take={take} hold={hold} follow={follow} letGo={letGo} putBack={putBack}>
         <Animated.View style={[StyleSheet.absoluteFill, { top: top + 50, bottom: typing !== null ? kb : 0, opacity: turn }]}>
-        <GHScrollView ref={scroll} scrollEnabled={!dragging} onScrollBeginDrag={scrolled} style={{ flex: 1 }} showsVerticalScrollIndicator={false}
+        <GHScrollView ref={scroll} scrollEnabled={!dragging} style={{ flex: 1 }} showsVerticalScrollIndicator={false} scrollEventThrottle={16}
+          onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
+          onLayout={(e) => { sized.current.view = e.nativeEvent.layout.height; }}
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
-          onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
+          onContentSizeChange={(_w, ch) => { sized.current.content = ch; if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page key={day} items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
-            preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent} onRename={recording ? undefined : onRename} ownTitle={ownTitle}
+            api={pageApi} voice={voice} indent={indent} onRename={recording ? undefined : onRename} ownTitle={ownTitle}
             onDrag={setDragging} onMove={onMove} onEdit={edit}
             onMerge={recording ? undefined : onMerge} onShare={(item) => setChoosing(new Set([`t${item}`]))} onSelect={setReading}
             onOpen={(idx) => setViewing({ idx, at: 0 })}
             chosen={choosing ?? undefined} onChoose={choosing ? choose : undefined}
             stickers={stickers} slap={slap} onSticker={onSticker} bin={binAt} scroll={scroll} onStickerDrag={setBin} /> : null}
 
-          {showTray ? (
-            <View style={{ gap: 10 }}>
-              <View style={h.trayHead}>
-                <Text style={{ fontSize: 13, color: t.mut }}>{select ? S.selN(sel.length) : groups.length ? S.photosOfG(photos.length, groups.length) : S.photosOf(photos.length)}</Text>
-                <Pressable disabled={recording} hitSlop={8} onPress={() => { setSelect(!select); setSel([]); }}>
-                  <Text style={{ fontSize: 13.5, color: select ? t.ink : t.mut, opacity: recording ? 0.35 : 1 }}>{select ? S.cancel : S.groupBtn}</Text>
-                </Pressable>
-              </View>
-              <Tray photos={photos} groups={groups} skip={onPage} width={W - 2 * SZ.px} select={select} sel={sel} onToggle={toggle} onOpen={(idx) => setViewing({ idx, at: 0 })} onLong={liftPhoto} onRelease={releasePhoto} cur={-1} />
-              {select ? <Text style={[h.hint, { color: t.mut }]}>{S.selHow}</Text>
-                : !said.length && !recording ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>{S.photoHow}</Text> : null}
-            </View>
-          ) : null}
+          {laid === 0 ? tray : null}
 
           {unlaid.length ? <Stream items={unlaid} onEdit={(i, part) => edit(laid + i, part)} /> : null}
 
@@ -365,8 +430,10 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
               placeholder={S.writeHint} placeholderTextColor={t.mut} onBlur={finishTyping}
               style={[zh ? h.tx : h.txEn, { color: t.ink, fontFamily: face.body, padding: 0, minHeight: 60 }]} />
           ) : null}
+          {/* once the page is laid out, every photo of the day stays here at the foot of it, small and numbered */}
+          {laid > 0 ? tray : null}
           {/* the rest of the page: a tap anywhere here starts writing */}
-          {!recording && !making && !select && !choosing && !ghost && typing === null ? (
+          {!recording && !making && !select && !choosing && !carried && typing === null ? (
             <Pressable onPress={() => setTyping('')} style={{ minHeight: 260 }} accessibilityLabel={S.writeHint} />
           ) : null}
           {nothing && typing === null ? (
@@ -377,7 +444,6 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           ) : null}
         </GHScrollView>
         </Animated.View>
-        </Carry>
       )}
 
       {!making ? <LinearGradient colors={[t.b + '00', t.b]} locations={[0, 0.45]} style={[h.fadeOut, { height: listBottom }]} pointerEvents="none" /> : null}
@@ -444,10 +510,10 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
         )}
       </View>
 
-      {ghost ? (
-        <Animated.View pointerEvents="none" style={[h.carry, { width: g.w, height: g.h, opacity: over ? 0 : 0.94, transform: ghostXY.getTranslateTransform() }]}>
-          {ghost.length > 1 ? <Mosaic pics={ghost} w={g.w} h={g.h} r={8} /> : <Image source={src(ghost[0])} contentFit="cover" style={{ width: g.w, height: g.h, borderRadius: 8 }} />}
-        </Animated.View>
+      {carried ? (
+        <Re.View pointerEvents="none" style={[h.carry, ghostStyle]}>
+          {carried.length > 1 ? <Fluid pics={carried} /> : <Image source={src(carried[0])} contentFit="cover" style={{ flex: 1, borderRadius: 8 }} />}
+        </Re.View>
       ) : null}
 
       {bin ? (
@@ -508,22 +574,6 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   );
 }
 
-/* the touch that carries a photo lifted from the tray: it takes over on the first move after the long press,
-   so the finger can take the photo anywhere on the page */
-function Carry({ take, hold, follow, letGo, putBack, children }: {
-  take: () => boolean; hold: () => void; follow: (x: number, y: number) => void; letGo: (x: number, y: number) => void; putBack: () => void; children: React.ReactNode;
-}) {
-  const pr = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponderCapture: () => take(),
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderGrant: () => hold(),
-    onPanResponderMove: (_, gs) => follow(gs.moveX, gs.moveY),
-    onPanResponderRelease: (_, gs) => letGo(gs.moveX, gs.moveY),
-    onPanResponderTerminate: () => putBack(),
-  }), [take, hold, follow, letGo, putBack]);
-  return <View style={StyleSheet.absoluteFill} {...pr.panHandlers}>{children}</View>;
-}
-
 const h = StyleSheet.create({
   tb: { position: 'absolute', left: 0, right: 0, paddingLeft: SZ.px, paddingRight: SZ.px - 4, height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 22 },
@@ -548,7 +598,7 @@ const h = StyleSheet.create({
   layout: { height: 38, paddingHorizontal: 22, borderRadius: 19, justifyContent: 'center' },
   ctl: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'flex-start' },
   selRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: (SZ.talk - SZ.key) / 2 },
-  carry: { position: 'absolute', left: 0, top: 0, opacity: 0.94, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 14, shadowOffset: { width: 0, height: 8 } },
+  carry: { position: 'absolute', shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 14, shadowOffset: { width: 0, height: 8 } },
   editWrap: { justifyContent: 'flex-end' },
   sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: SZ.px, paddingTop: 14, gap: 6 },
   sheetBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 4 },

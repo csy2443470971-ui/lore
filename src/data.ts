@@ -46,6 +46,7 @@ const zh = {
   /* --- new direction --- */
   hi: (night: boolean): string => night ? '晚上好' : '下午好', ask0: '今天过得\n怎么样？', bubbleMore: '下午说过一段，接着说？', bubbleNone: '说一句也好',
   photoHow: '按编号说说每张照片就好，比如“一号是……，三到六号是……”，我们会对上号。',
+  dragHow: '长按一张照片，拖到页面里：可以放在文字旁边，也可以放在两段之间，一行最多三张。',
   dragHint: '拖动照片，文字会自己让开', discarded: '这段不要了', releaseCancel: '松开手指，这段就不要了',
   micDenied: '要录音，需要打开麦克风权限', cameraDenied: '要拍照，需要打开相机权限', openSettings: '去设置',
   delPhoto: '删除这张', delGroup: '删除这组', ungroup: '取消分组',
@@ -53,7 +54,7 @@ const zh = {
   heardNothing: '没听清，再说一次？', notReached: '没连上，录音还在', retry: '重试', liveStopped: '录音中断了，点红点把录到的发出去',
   writeHint: '写点什么…',
   sPlace: '记录写作地点', sPlaceSub: '每天第一次写的时候，记下你在哪个街区或城市，写在日期旁边。只存在手机上。', placeDenied: '没有定位权限，可以在系统设置里打开', titleAsk: '给这一页起个标题',
-  pen: '画笔', cutOut: '抠图', cutHint: '沿着要的东西描一圈', crop: '裁剪', cropReset: '还原', circleAgain: '再描一次', toPage: '贴到页面', deleteAsk: '删除这张照片？', del: '删除', thick: '粗', thin: '细', undoMark: '撤销', restore: '还原原图',
+  pen: '画笔', cutOut: '抠图', cutHint: '沿着要的东西描一圈', crop: '裁剪', cropReset: '还原', cropFree: '自由', cropUp: '竖', cropAcross: '横', circleAgain: '再描一次', toPage: '贴到页面', deleteAsk: '删除这张照片？', del: '删除', thick: '粗', thin: '细', undoMark: '撤销', restore: '还原原图',
   joinUp: '↑ 并到上一段', joinDown: '↓ 并到下一段', selectText: '选择文字', selectHint: '按住文字可以选择，拷贝或分享', wrapOn: '文字绕开', wrapOff: '叠在上面',
   shareThis: '分享…', chooseShare: '点选要分享的段落和照片', chosenN: (p: number, ph: number) => `${p} 段 · ${ph} 张照片`, makeCard: '生成分享图', shareTitle: '分享图', share: '分享', paperTone: '纸', inkTone: '墨', fmtPost: '4:5', fmtStory: '9:16', shareNeedsApp: '要在新装的 App 里才能存成图片', slogan: '说给它听，留成一本书。', months: ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'], weekdays: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
   stickers: '贴纸', fromPhoto: '用照片做', mine: '我做的', stickerSet: 'Lore 贴纸', liftNone: '这张照片里没找到清楚的主体，换一张试试', liftNeedsApp: '要在新装的 App 里才能用照片做贴纸', lifting: '正在抠图…', binHint: '拖到这里撕掉', stickersSoon: '贴纸还在画，马上就好',
@@ -166,6 +167,7 @@ const en: typeof zh = {
   /* --- new direction --- */
   hi: (night) => night ? 'Good evening' : 'Good afternoon', ask0: 'How was\nyour day?', bubbleMore: 'You talked this afternoon. Carry on?', bubbleNone: 'Even one sentence is enough',
   photoHow: 'Just describe each photo by its number, like “Number one is…, three to six are…”. We’ll match them up.',
+  dragHow: 'Hold a photo and drag it onto the page: beside the words, or between two paragraphs, up to three in a row.',
   dragHint: 'Drag a photo and the words move out of its way', discarded: 'Discarded', releaseCancel: 'Let go to discard',
   micDenied: 'Turn on the microphone to record', cameraDenied: 'Turn on the camera to take photos', openSettings: 'Open Settings',
   delPhoto: 'Delete photo', delGroup: 'Delete group', ungroup: 'Ungroup',
@@ -173,7 +175,7 @@ const en: typeof zh = {
   heardNothing: 'Didn’t catch that. Try again?', notReached: 'Couldn’t reach Lore. The recording is kept', retry: 'Retry', liveStopped: 'Recording stopped. Tap the red dot to send what was recorded',
   writeHint: 'Write something…',
   sPlace: 'Record where you write', sPlaceSub: 'On the first writing of each day, the neighbourhood or city goes beside the date. It stays on the phone.', placeDenied: 'Location is off for Lore. It can be turned on in Settings', titleAsk: 'A title for this page',
-  pen: 'Pen', cutOut: 'Cut out', cutHint: 'Trace around what you want', crop: 'Crop', cropReset: 'Reset', circleAgain: 'Try again', toPage: 'Put on the page', deleteAsk: 'Delete this photo?', del: 'Delete', thick: 'Thick', thin: 'Thin', undoMark: 'Undo', restore: 'Original',
+  pen: 'Pen', cutOut: 'Cut out', cutHint: 'Trace around what you want', crop: 'Crop', cropReset: 'Reset', cropFree: 'Free', cropUp: 'Tall', cropAcross: 'Wide', circleAgain: 'Try again', toPage: 'Put on the page', deleteAsk: 'Delete this photo?', del: 'Delete', thick: 'Thick', thin: 'Thin', undoMark: 'Undo', restore: 'Original',
   joinUp: '↑ Join above', joinDown: '↓ Join below', selectText: 'Select text', selectHint: 'Press and hold the words to select, copy or share them', wrapOn: 'Text wraps', wrapOff: 'On top',
   shareThis: 'Share…', chooseShare: 'Tap the paragraphs and photos to share', chosenN: (p, ph) => `${p} paragraph${p === 1 ? '' : 's'} · ${ph} photo${ph === 1 ? '' : 's'}`, makeCard: 'Make the image', shareTitle: 'Share image', share: 'Share', paperTone: 'Paper', inkTone: 'Ink', fmtPost: '4:5', fmtStory: '9:16', shareNeedsApp: 'Saving the image needs the newly installed app', slogan: 'The journal you talk into, and a book you’ll keep.', months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'], weekdays: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
   stickers: 'Stickers', fromPhoto: 'From a photo', mine: 'Made by you', stickerSet: 'Lore stickers', liftNone: 'No clear subject in that photo. Try another one', liftNeedsApp: 'Stickers from photos need the newly installed app', lifting: 'Cutting it out…', binHint: 'Drop here to peel it off', stickersSoon: 'The stickers are still being drawn',
