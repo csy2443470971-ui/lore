@@ -103,7 +103,9 @@ const PAD = 9;                                    // the space between a photo a
 
 const adv = (m: Metric, size: number, s: string) => {
   let w = 0;
-  for (const ch of s) w += (m.w[ch.codePointAt(0)!] ?? m.def) / m.upm * size;
+  /* a Chinese character is a full em wide whatever the page's language: Chinese written on a page set in English
+     (or the other way round) is measured per character, so the lines come out right and nothing overlaps */
+  for (const ch of s) w += CJK.test(ch) || /[　-〿＀-￯]/.test(ch) ? size : (m.w[ch.codePointAt(0)!] ?? m.def) / m.upm * size;
   return w;
 };
 /* Chinese breaks between any two characters, other scripts between words */

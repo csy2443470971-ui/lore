@@ -202,7 +202,8 @@ export default function App() {
     const key = cur, stack = past[key], snap = stack?.[stack.length - 1];
     if (!snap) return;
     setPast((m) => ({ ...m, [key]: stack.slice(0, -1) }));
-    update(key, (d) => ({ ...d, said: [...snap.said.slice(0, snap.laid), ...d.said.slice(d.laid)], laid: snap.laid, placed: snap.placed, moved: snap.moved }));
+    /* back to how the day was: everything it had said (laid out or not), then whatever was said since that isn't laid out */
+    update(key, (d) => ({ ...d, said: [...snap.said, ...d.said.slice(d.laid)], laid: snap.laid, placed: snap.placed, moved: snap.moved }));
     Haptics.selectionAsync().catch(() => {});
   }
 
