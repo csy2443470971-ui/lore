@@ -149,7 +149,7 @@ function cuts(word: string): number[] {
 /* a sticker the words go around: the points of its outline, turned as it is, x across the page and y down from the top
    of the paragraph it is tied to; it changes only the lines of that paragraph and the ones after it */
 type Float = { p: number; pts: { x: number; y: number }[] };
-function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number, heads: number[] = [], indents: number[] = [], floats: Float[] = [], rowsAt: number[] = []) {
+function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number, heads: number[] = [], indents: number[] = [], floats: Float[] = [], rowsAt: number[] = [], sections: boolean[] = []) {
   const e = PAD - (lh - size) / 2;                // how far a photo's edge sits inside its first and last line
   const minSeg = size * 4;                        // a gap beside a photo narrower than this stays empty
   const lines: Line[] = [], starts: number[] = [], rows: number[] = [], tops: number[] = [];
@@ -163,7 +163,9 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
      never leaves an empty space beside it */
   let hanging: { sp: Spot; y0: number; y1: number }[] = [];
   paras.forEach((para, pi) => {
-    if (rowsAt[pi]) { for (const o of hanging) y = Math.max(y, o.y1 - e + gap); hanging = []; }   // a row of photos goes below them
+    /* a row of photos, or a new part of the day, goes below any photo hanging from above: photos reach across paragraphs,
+       never across parts of the day */
+    if (rowsAt[pi] || sections[pi]) { for (const o of hanging) y = Math.max(y, o.y1 - e + gap); hanging = []; }
     rowTops[pi] = y; y += rowsAt[pi] ?? 0;
     /* A photo hanging on the left: the heading and time start just past it, with the words, which go on beside it. When
        it would sit beside fewer than two of the words' lines, or leave too little room for the heading, the paragraph
@@ -349,11 +351,12 @@ function rowOf(items: { r: number; w?: number }[], W: number) {
    on a paragraph's last line never puts the photo beside that last sentence.
    It goes by the finger, not the photo, so a photo goes between two paragraphs where the finger is between them and
    beside the words where the finger is on them, even beside a paragraph's last lines. */
-function boundaryAt(base: { tops: number[]; bottoms: number[]; starts: number[] }, cy: number, lh: number): number {
+function boundaryAt(base: { tops: number[]; bottoms: number[]; starts: number[]; rows: number[] }, cy: number, lh: number): number {
   const P = base.bottoms.length;
   let best = -1, bd = Infinity;
   for (let b = 0; b <= P; b++) {
-    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - lh + 2;   // the last line above belongs to the boundary
+    /* the last line above belongs to the boundary, unless it is the paragraph's only line: a photo can go beside that */
+    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - ((base.rows[b - 1] ?? 1) >= 2 ? lh - 2 : 2);
     const hi = b === P ? Infinity : base.tops[b] + 10;
     if (cy < lo || cy > hi) continue;
     const mid = ((b === 0 ? (base.tops[0] ?? 0) - 20 : base.bottoms[b - 1]) + (b === P ? (base.bottoms[P - 1] ?? 0) + 20 : base.tops[b])) / 2;
@@ -766,7 +769,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   const m = SERIF;
   const cn = useCn();
   const run = (spots: Spot[], rowsAt: number[] = []) => flow(paras, spots, W, m, size, lh, gap, heads,
-    paras.map((pa) => (!indent ? 0 : isCJK(pa.trimStart().charAt(0)) ? size * 2 : adv(m, size, 'nnnn'))), floats, rowsAt);
+    paras.map((pa) => (!indent ? 0 : isCJK(pa.trimStart().charAt(0)) ? size * 2 : adv(m, size, 'nnnn'))), floats, rowsAt, marks.map((mk, pi) => !!mk.head && pi > 0));
 
   /* one paragraph per recording; a recording about photos brings its photos (a group counts as one tile) */
   const paras: string[] = [];
@@ -806,7 +809,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   /* stickers the words go around; one being moved goes around where the fingers have it now */
   const [slid, setSlid] = useState<Sticker | null>(null);
   const [picked, setPicked] = useState<string | null>(null);     // the sticker tapped: its switch shows
-  const floats: Float[] = [...(stickers ?? []).filter((st) => st.wrap && st.p >= 0 && st.id !== slid?.id), ...(slid && slid.p >= 0 ? [slid] : [])]
+  const floats: Float[] = [...(stickers ?? []).filter((st) => st.wrap && st.p >= 0 && st.id !== slid?.id), ...(slid && slid.p >= 0 && (stickers ?? []).some((st) => st.id === slid.id) ? [slid] : [])]
     .map((st) => ({ p: Math.min(st.p, Math.max(0, paras.length - 1)), pts: outlineOf(st) }));
   const e = PAD - (lh - size) / 2;
   const linesFor = (h: number) => Math.max(2, Math.round((h + 2 * e) / lh));
@@ -997,7 +1000,11 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   const edge = useRef(onEdge), dragging = useRef(onDrag);
   useEffect(() => { edge.current = onEdge; dragging.current = onDrag; });
   /* a sticker held, or let go: the page stops scrolling while it is held */
-  const holdSticker = useCallback((id: string | null) => { setHolding(id); dragging.current?.(!!id); }, []);
+  const holdSticker = useCallback((id: string | null) => {
+    setHolding(id); dragging.current?.(!!id);
+    /* let go: the words go around where the sticker is kept (a sticker held and let go without moving left its copy) */
+    if (!id) setTimeout(() => { cancelAnimationFrame(slider.current.frame); slider.current.sig = ''; setSlid(null); }, 250);
+  }, []);
   /* the words reflow only when the photo's place really changes (its paragraph, line, or some points across), at most once a frame */
   const shown = useRef('');
   /* While a photo is held the words make room for it as it goes, in real time: each time its place changes (a line, a
@@ -1039,14 +1046,13 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     const cy = y + h / 2;
     let b = boundaryAt(nw.base, fgy, lh);
     const sp = toSpot(id, x, y, w, h, nw.base, W, lh, size);
-    /* The two kinds of place are kept apart: beside the words a photo always has at least two lines of its own
-       paragraph next to it. One that would sit beside a paragraph's last line only goes between that paragraph and the
-       next instead (a one-line paragraph: before it with the finger over its upper half, after it below), so a photo
-       meant for the gap never takes the last sentence above with it. */
+    /* The two kinds of place are kept apart: beside the words of a paragraph of two lines or more, a photo has at least
+       two of its lines next to it. One that would sit beside such a paragraph's last line only goes between it and the
+       next instead, so a photo meant for the gap never takes the last sentence above with it. A one-line paragraph
+       takes a photo beside its line, and the sentence goes around it. */
     if (b < 0) {
       const rows = nw.base.rows[sp.p] ?? 1;
-      if (rows < 2) b = sp.p + (fgy < (nw.base.starts[sp.p] ?? 0) + lh / 2 ? 0 : 1);
-      else if (sp.k > rows - 2) b = sp.p + 1;
+      if (rows >= 2 && sp.k > rows - 2) b = sp.p + 1;
     }
     if (b >= 0) {
       const rs = nw.brow.get(b) ?? [];
@@ -1316,7 +1322,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
           return (
             <View style={[d.seg, { top: at - 44, left: Math.max(-8, Math.min(W - 236, st.x + st.w / 2 - 118)), backgroundColor: t.panel }]}>
               {seg(!!st.wrap, S.wrapOn, true)}{seg(!st.wrap, S.wrapOff, false)}
-              <Pressable onPress={() => { setPicked(null); onSticker(st.id, null); }} style={d.segBtn}>
+              <Pressable onPress={() => { setPicked(null); setSlid(null); onSticker(st.id, null); }} style={d.segBtn}>
                 <Text style={{ fontSize: 12.5, color: t.red }}>{S.del}</Text>
               </Pressable>
             </View>
