@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActionSheetIOS, Alert, Animated, Dimensions, KeyboardAvoidingView, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActionSheetIOS, Alert, Animated, Dimensions, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -72,6 +72,15 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const [sharing, setSharing] = useState(false);
   const [stickerBox, setStickerBox] = useState(false);                  // the sticker box is open
   const [reading, setReading] = useState<string | null>(null);
+  /* writing straight onto the page, as in Notes: a tap on empty space puts the cursor at the end of the page; what is
+     typed becomes a paragraph of its own when the finger goes elsewhere or Done is pressed */
+  const [typing, setTyping] = useState<string | null>(null);
+  const [kb, setKb] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', (e) => setKb(e.endCoordinates.height));
+    const hide = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKb(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   const [viewing, setViewing] = useState<{ idx: number[]; at: number; pics?: Pic[]; only?: 'cut' } | null>(null);   // a photo open full screen          // a paragraph opened to select (and copy) its words
   const [bin, setBin] = useState<'on' | 'over' | null>(null);           // a sticker is being carried: the bin shows in the talk key's place
   const [draft, setDraft] = useState('');
@@ -267,6 +276,15 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
     area.current.measureInWindow((_x, ay) => place(top + 50 + 80 + Math.random() * 60 - ay));
   };
   const makeSticker = async () => { setStickerBox(false); const uri = await onMakeSticker(); if (uri) setViewing({ idx: [], at: 0, pics: [{ uri }], only: 'cut' }); };
+  useEffect(() => { if (typing !== null) setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 120); }, [typing === null, kb]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /* what was typed becomes a paragraph of its own (not laid out until the page is) */
+  function finishTyping() {
+    const text = (typing ?? '').trim();
+    setTyping(null);
+    if (!text) return;
+    onSaved({ kind: 'talk', text, at: Date.now(), g: true });
+    Haptics.selectionAsync().catch(() => {});
+  }
   const scrolled = useCallback(() => { if (lift.current) lift.current.moved = true; }, []);
   const follow = useCallback((x: number, y: number) => handlers.current.carryTo(x, y), []);
   const letGo = useCallback((x: number, y: number) => handlers.current.dropAt(x, y), []);
@@ -297,7 +315,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
         </View>
       ) : (
         <Carry take={take} hold={hold} follow={follow} letGo={letGo} putBack={putBack}>
-        <Animated.View style={[StyleSheet.absoluteFill, { top: top + 50, opacity: turn }]}>
+        <Animated.View style={[StyleSheet.absoluteFill, { top: top + 50, bottom: typing !== null ? kb : 0, opacity: turn }]}>
         <GHScrollView ref={scroll} scrollEnabled={!dragging} onScrollBeginDrag={scrolled} style={{ flex: 1 }} showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
@@ -342,7 +360,16 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
             </Text>
           ) : null}
 
-          {nothing ? (
+          {typing !== null ? (
+            <TextInput value={typing} onChangeText={setTyping} multiline autoFocus scrollEnabled={false} selectionColor={t.red}
+              placeholder={S.writeHint} placeholderTextColor={t.mut} onBlur={finishTyping}
+              style={[zh ? h.tx : h.txEn, { color: t.ink, fontFamily: face.body, padding: 0, minHeight: 60 }]} />
+          ) : null}
+          {/* the rest of the page: a tap anywhere here starts writing */}
+          {!recording && !making && !select && !choosing && !ghost && typing === null ? (
+            <Pressable onPress={() => setTyping('')} style={{ minHeight: 260 }} accessibilityLabel={S.writeHint} />
+          ) : null}
+          {nothing && typing === null ? (
             <View style={{ marginTop: 24, gap: 8 }}>
               <Text style={{ fontSize: 14, color: t.mut, fontFamily: face.body }}>{S.hi(night)}</Text>
               <Text style={[h.ask, { color: t.ink, fontFamily: face.title }]}>{S.ask0}</Text>
