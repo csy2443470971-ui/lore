@@ -50,12 +50,12 @@ export function DayMenu({ days, cur, rows, more, onPick, onClose }: {
 }
 
 const m = StyleSheet.create({
-  card: { position: 'absolute', left: SZ.px - 6, width: 250, borderRadius: 18, paddingVertical: 6, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
-  dots: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+  card: { position: 'absolute', left: SZ.px - 6, width: 220, borderRadius: 18, paddingVertical: 6, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
+  dots: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4 },
   dotWrap: { alignItems: 'center', gap: 5 },
-  dot: { minWidth: 44, height: 44, borderRadius: 22, borderWidth: 1.2, alignItems: 'center', justifyContent: 'center' },
-  dotWide: { paddingHorizontal: 14 },
-  dotT: { fontSize: 16 },
+  dot: { minWidth: 36, height: 36, borderRadius: 18, borderWidth: 1.2, alignItems: 'center', justifyContent: 'center' },
+  dotWide: { paddingHorizontal: 11 },
+  dotT: { fontSize: 14.5 },
   mark: { width: 5, height: 5, borderRadius: 2.5 },
   rule: { height: StyleSheet.hairlineWidth, marginHorizontal: 16, marginVertical: 4 },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, height: 44 },
