@@ -496,7 +496,7 @@ function bus<T>(): Bus<T> {
 function Landing({ hook, color }: { hook: Bus<Rect | null>; color: string }) {
   const [r, setR] = useState<Rect | null>(null);
   useEffect(() => hook.on(setR), [hook]);
-  return r ? <View pointerEvents="none" style={[d.landing, { left: r.x, top: r.y, width: r.w, height: r.h, backgroundColor: color }]} /> : null;
+  return r ? <View pointerEvents="none" style={[d.landing, { left: r.x, top: r.y, width: r.w, height: r.h, borderColor: color }]} /> : null;
 }
 
 /* how a set of photos sits together: one, a pair, one large with two small, or a 2×2 grid; w is the page width */
@@ -669,10 +669,9 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   const held = useRef({ w: 0, h: 0 });
   /* the words reflow only when the photo's place really changes (its paragraph, line, or some points across), at most once a frame */
   const shown = useRef('');
-  const frame = useRef(0);
-  /* While a photo is held the words stay still: only the soft landing space follows the finger. When the finger rests
-     for a moment the words make room; let go, they settle at once. Reflowing the whole page on every line the finger
-     crossed is what made dragging stutter. */
+  /* While a photo is held the words don't move at all: the space it was lifted from stays, and a thin outline follows
+     the finger to show where it will land. Only when it is let go do the words reflow, once. Reflowing while it was
+     held (on every line the finger crossed, or whenever it rested) is what made dragging jump about. */
   const land = useMemo(() => bus<Rect | null>(), []);
   const place = useCallback((id: string, at: Pos, h: number) => {
     last.current = { id, at };
@@ -681,8 +680,6 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     shown.current = sig;
     const { starts: ss } = tied.current, n = linesFor(h);
     land.emit({ x: at.x, y: (ss[at.p ?? 0] ?? 0) + (at.k ?? 0) * lh + e, w: at.w ?? 0, h: n * lh - 2 * e });
-    clearTimeout(frame.current);
-    frame.current = setTimeout(() => setLive((s) => ({ ...s, [id]: at })), 120) as unknown as number;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lh, e, land]);
   const grab = useCallback((id: string) => {
@@ -704,7 +701,6 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     place(id, { x: Math.round(side), y, p: sp.p, k: sp.k, w: ww }, h);
   }, [W, lh, size, place]);
   const drop = useCallback(() => {
-    clearTimeout(frame.current);
     land.emit(null);
     const lt = last.current;
     if (lt) { setLive((s) => ({ ...s, [lt.id]: lt.at })); moveTo.current(lt.id, lt.at); }
@@ -826,7 +822,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
           </React.Fragment>
         ))}
         {lines.map(setLine)}
-        <Landing hook={land} color={t.gray} />
+        <Landing hook={land} color={t.mut} />
         {tiles.map((tl) => (
           <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop} open={onOpen ? openTile : undefined}>
             {tl.pics.length > 1 ? <Fluid pics={tl.pics} />
@@ -934,7 +930,7 @@ function VoiceBar({ bar }: { bar: Bar }) {
 const d = StyleSheet.create({
   head: { position: 'absolute', left: 0, fontSize: 14.5, lineHeight: 20, fontWeight: '600' },
   marker: { position: 'absolute', borderRadius: 3 },
-  landing: { position: 'absolute', borderRadius: 8, opacity: 0.7 },
+  landing: { position: 'absolute', borderRadius: 10, borderWidth: 1.5, borderStyle: 'dashed', zIndex: 1 },
   seg: { position: 'absolute', zIndex: 6, flexDirection: 'row', borderRadius: 17, padding: 3, gap: 2, width: 176, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
   segBtn: { flex: 1, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   dim: { position: 'absolute', left: -40, right: -40, top: -400, bottom: -800, opacity: 0.72, zIndex: 7 },
