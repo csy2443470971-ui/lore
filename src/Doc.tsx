@@ -111,7 +111,7 @@ export const isCJK = (s: string) => CJK_ANY.test(s);
 /* Newsreader sits higher in its line than the Chinese face does: set alone on a line, an English word goes down this much
    so the two share a baseline */
 const LATIN_DROP = 1.5;
-export const LATIN = 14.5 / 14;                   // Newsreader's size over the Chinese face's: a hair larger, so the two read as one size
+export const LATIN = 15 / 14;                     // Newsreader's size over the Chinese face's: a little larger, so the two read as one size
 /* a stretch of diary text as runs, each in its own face, for a Text whose fontSize is the Chinese size */
 export function mixed(text: string, size: number, cn: string): React.ReactNode[] {
   return (text.match(/[⺀-鿿豈-﫿　-〿＀-￯]+|[^⺀-鿿豈-﫿　-〿＀-￯]+/g) ?? []).map((r, i) => (
