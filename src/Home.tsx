@@ -335,7 +335,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
                   <Text style={{ fontSize: 13.5, color: select ? t.ink : t.mut, opacity: recording ? 0.35 : 1 }}>{select ? S.cancel : S.groupBtn}</Text>
                 </Pressable>
               </View>
-              <Tray photos={photos} groups={groups} skip={onPage} width={W - 2 * SZ.px} select={select} sel={sel} onToggle={toggle} onLong={liftPhoto} onRelease={releasePhoto} cur={-1} />
+              <Tray photos={photos} groups={groups} skip={onPage} width={W - 2 * SZ.px} select={select} sel={sel} onToggle={toggle} onOpen={(idx) => setViewing({ idx, at: 0 })} onLong={liftPhoto} onRelease={releasePhoto} cur={-1} />
               {select ? <Text style={[h.hint, { color: t.mut }]}>{S.selHow}</Text>
                 : !said.length && !recording ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>{S.photoHow}</Text> : null}
             </View>

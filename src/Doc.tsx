@@ -316,8 +316,11 @@ function MovableIn({ id, r, z, W, locked, block, grab, move, drop, open, two, ch
     };
     /* the photo moves by how far the fingers moved since the last frame; the frame a finger lands or lifts (when their
        centre jumps) it doesn't move at all, so adding or lifting a finger never makes it jump */
-    const pan = Gesture.Pan().enabled(!locked).minDistance(2).averageTouches(true)
-      .onStart((e) => { last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers }); begin(1); two.set({ ...two.get(), x1: e.absoluteX, y1: e.absoluteY }); })
+    /* a finger can't touch down without drifting a few points, so a drag starts only after 8 and a tap may drift 12:
+       with a smaller drag distance most taps on a real screen were taken for drags, and nothing opened. The drag counts
+       from where the finger touched down, so the photo doesn't lag behind it. */
+    const pan = Gesture.Pan().enabled(!locked).minDistance(8).averageTouches(true)
+      .onStart((e) => { last.set({ x: 0, y: 0, n: e.numberOfPointers }); begin(1); two.set({ ...two.get(), x1: e.absoluteX, y1: e.absoluteY }); })
       .onUpdate((e) => {
         const l = last.get();
         last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers });
@@ -338,7 +341,7 @@ function MovableIn({ id, r, z, W, locked, block, grab, move, drop, open, two, ch
       })
       .onFinalize(() => end(2));
     if (block && Platform.OS !== 'web') { pan.blocksExternalGesture(block as never); pinch.blocksExternalGesture(block as never); }
-    const tap = Gesture.Tap().maxDuration(300).onEnd((_e, ok) => { if (ok) scheduleOnRN(onOpen, id); });
+    const tap = Gesture.Tap().maxDuration(600).maxDistance(12).onEnd((_e, ok) => { if (ok) scheduleOnRN(onOpen, id); });
     return Gesture.Race(tap, Gesture.Simultaneous(pan, pinch));
   }, [id, W, locked, block, onGrab, onMove, onDrop, onOpen, x, y, w, h, home, live, size, last, two]);
   /* a second finger elsewhere on the page: the photo grows or shrinks by how far apart the two fingers are */
@@ -435,8 +438,11 @@ function StuckIn({ st, top, W, source, slap, locked, bin, block, place, carry, s
       bx.set(nx); by.set(ny); bw.set(Math.round(w2)); br.set(nr); dx.set(0); dy.set(0); sc.set(1); rot.set(0);
       scheduleOnRN(onPlace, id, { x: nx, y: ny, w: Math.round(w2), r: nr });
     };
-    const pan = Gesture.Pan().enabled(!locked).minDistance(2).averageTouches(true)
-      .onStart((e) => { last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers }); begin(1); two.set({ ...two.get(), x1: e.absoluteX, y1: e.absoluteY }); })
+    /* a finger can't touch down without drifting a few points, so a drag starts only after 8 and a tap may drift 12:
+       with a smaller drag distance most taps on a real screen were taken for drags, and nothing opened. The drag counts
+       from where the finger touched down, so the photo doesn't lag behind it. */
+    const pan = Gesture.Pan().enabled(!locked).minDistance(8).averageTouches(true)
+      .onStart((e) => { last.set({ x: 0, y: 0, n: e.numberOfPointers }); begin(1); two.set({ ...two.get(), x1: e.absoluteX, y1: e.absoluteY }); })
       .onUpdate((e) => {
         const l = last.get();
         last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers });
@@ -457,7 +463,7 @@ function StuckIn({ st, top, W, source, slap, locked, bin, block, place, carry, s
       .onUpdate((e) => { rot.set(r0.get() + e.rotation * 180 / Math.PI); report(); })
       .onFinalize(() => end(4));
     if (block && Platform.OS !== 'web') for (const g of [pan, pinch, turn]) g.blocksExternalGesture(block as never);
-    const touch = Gesture.Tap().enabled(!locked).maxDuration(300).onEnd((_e, ok) => { if (ok) scheduleOnRN(onTap, id); });
+    const touch = Gesture.Tap().enabled(!locked).maxDuration(600).maxDistance(12).onEnd((_e, ok) => { if (ok) scheduleOnRN(onTap, id); });
     return Gesture.Race(touch, Gesture.Simultaneous(pan, pinch, turn));
   }, [id, W, locked, block, onPlace, onCarry, onSlide, onTap, onHold, bx, by, bw, br, dx, dy, sc, rot, live, over, s0, r0, binAt, last, wraps, two]);
   /* a second finger elsewhere on the page: the sticker grows, shrinks and turns with the two fingers */
