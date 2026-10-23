@@ -282,7 +282,7 @@ function toSpot(key: string, x: number, y: number, w: number, h: number, base: {
     const dd = Math.abs(st + kk * lh + e - y);
     if (dd < best) { best = dd; p = i; k = kk; }
   });
-  const sx = x < 24 ? 0 : x > W - w - 24 ? W - w : x;
+  const sx = x < 30 ? 0 : x > W - w - 30 ? W - w : x;
   return { key, x: Math.max(0, Math.min(W - w, sx)), w, p, k, n: Math.max(2, Math.round((h + 2 * e) / lh)) };
 }
 
@@ -331,28 +331,31 @@ export const soloFor = (r: number, w: number): Rect => {
   return { x: 0, y: 0, w: ww, h: Math.round(ww * r) };
 };
 
-/* Photos between two paragraphs sit in rows of up to three, each row as wide as the page: the photos keep their shapes
-   and share one height. */
+/* Photos between two paragraphs sit in rows of up to three, centred: they keep their shapes and the size they have
+   beside the words (one height for the row, their sizes' average), smaller only when they wouldn't fit across the
+   page. A photo put between two paragraphs never suddenly grows. */
 const GT = 6;
 function rowOf(rs: number[], W: number) {
   const sum = rs.reduce((a, r) => a + 1 / r, 0);
-  const h = Math.min(Math.round((W - GT * (rs.length - 1)) / sum), Math.round(Math.min(300, W * 0.9)));
+  const own = rs.reduce((a, r) => a + soloFor(r, W).h, 0) / rs.length;
+  const h = Math.round(Math.min(own, (W - GT * (rs.length - 1)) / sum));
   const ws = rs.map((r) => Math.round(h / r));
   const total = ws.reduce((a, b) => a + b, 0) + GT * (rs.length - 1);
   return { h, ws, x0: Math.round((W - total) / 2) };
 }
 /* the gap between two paragraphs the finger is in (0 before the first, the count after the last), or -1 when it is over
-   the words: the white space between the last line above and the first line below, the heading and time included.
+   the words: only the white space right at the boundary, between the last line above and the paragraph below (its
+   heading and time just begin there), so a photo goes into a row only when the finger is right at the boundary.
    It goes by the finger, not the photo, so a photo goes between two paragraphs where the finger is between them and
    beside the words where the finger is on them, even beside a paragraph's last lines. */
 function boundaryAt(base: { tops: number[]; bottoms: number[]; starts: number[] }, cy: number): number {
   const P = base.bottoms.length;
   let best = -1, bd = Infinity;
   for (let b = 0; b <= P; b++) {
-    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - 4;
-    const hi = b === P ? Infinity : base.starts[b] + 6;
+    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - 2;
+    const hi = b === P ? Infinity : base.tops[b] + 10;
     if (cy < lo || cy > hi) continue;
-    const mid = ((b === 0 ? (base.tops[0] ?? 0) - 20 : base.bottoms[b - 1]) + (b === P ? (base.bottoms[P - 1] ?? 0) + 20 : base.starts[b])) / 2;
+    const mid = ((b === 0 ? (base.tops[0] ?? 0) - 20 : base.bottoms[b - 1]) + (b === P ? (base.bottoms[P - 1] ?? 0) + 20 : base.tops[b])) / 2;
     const dd = Math.abs(cy - mid);
     if (dd < bd) { bd = dd; best = b; }
   }
@@ -998,13 +1001,23 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
      side, or a gap between paragraphs) the page reflows on the next frame. Only the lines that move are redrawn, and
      photos and stickers whose place didn't change aren't touched, so this keeps up with the finger. */
   const frame = useRef(0);
+  /* Going into a row between two paragraphs waits a moment (the finger has to stay at the boundary), so a finger only
+     passing over a gap doesn't open a row and close it again, moving the page under it. What is shown is what a
+     let-go keeps (last). */
+  const waiting = useRef<{ sig: string; timer?: ReturnType<typeof setTimeout> }>({ sig: '' });
+  const settle = () => { clearTimeout(waiting.current.timer); waiting.current = { sig: '' }; };
   const place = useCallback((id: string, at: Pos) => {
-    last.current = { id, at };
     const sig = `${id}|${at.p}|${at.k}|${at.x}|${at.w}|${at.b}|${at.o}`;
-    if (sig === shown.current) return;
-    shown.current = sig;
-    cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
+    if (sig === shown.current || sig === waiting.current.sig) return;
+    settle();
+    const go = () => {
+      waiting.current = { sig: '' };
+      shown.current = sig; last.current = { id, at };
+      cancelAnimationFrame(frame.current);
+      frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
+    };
+    if (at.b !== undefined && last.current?.at.b !== at.b) waiting.current = { sig, timer: setTimeout(go, 150) };
+    else go();
   }, [setLive]);
   const grab = useCallback((id: string) => {
     const nw = now.current, sz = nw.sizes[id] ?? { w: 0, h: 0 };
@@ -1020,7 +1033,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
      among the photos already there, at the place the finger is over. */
   const decide = useCallback((id: string, x: number, y: number, w: number, h: number, fgx: number, fgy: number) => {
     const nw = now.current;
-    const cx = x + w / 2, cy = y + h / 2;
+    const cy = y + h / 2;
     const b = boundaryAt(nw.base, fgy);
     if (b >= 0) {
       const rs = nw.brow.get(b) ?? [];
@@ -1036,9 +1049,9 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       return;
     }
     const sp = toSpot(id, x, y, w, h, nw.base, W, lh, size);
-    /* beside the words a photo sits against the left or the right edge, whichever its middle is nearer, so the words
-       beside it make one even column and nothing is left over on its other side */
-    sp.x = cx < W / 2 ? 0 : Math.max(0, W - w);
+    /* beside the words the photo is where the finger has it, and the words go around it there as it moves (in steps of
+       a few points); near an edge it goes against the edge */
+    if (sp.x > 0 && sp.x < W - w) sp.x = Math.round(sp.x / 6) * 6;
     /* not on top of another photo: it goes just below the one it would cover, or just above it when the finger is nearer
        its top (and there is room above in the paragraph) */
     const e = PAD - (lh - size) / 2, hh = sp.n * lh - 2 * e, st = nw.base.starts[sp.p] ?? 0;
@@ -1075,6 +1088,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     cancelAnimationFrame(frame.current);
     setHolding(null);
     const id = heldId.current, bn = binNow.current;
+    settle();
     heldId.current = null;
     dragging.current?.(false);
     edge.current?.(null);
@@ -1092,6 +1106,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   const carry = useCallback((c: { x: number; y: number; w: number; h: number; gx: number; gy: number } | null, lift?: number[]) => {
     if (!c) {
       cancelAnimationFrame(frame.current);
+      settle();
       shown.current = ''; last.current = null;
       setPv(null); setAway(null);
       setLive((s) => { if (!('preview' in s)) return s; const n = { ...s }; delete n.preview; return n; });

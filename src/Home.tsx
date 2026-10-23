@@ -428,7 +428,9 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const canRelayout = laid > 0 && !unlaid.length && !recording && !shown && !making && !select && real === 'idle' && !carried && !choosing && !bin;   // a laid-out day can be laid out again
   const ctlBottom = ins.bottom + 30;
   const ctlH = SZ.talk + 28;
-  const listBottom = ctlBottom + ctlH + (canLayout || canRelayout ? 96 : 30);
+  /* room under the page for the buttons over it; it doesn't change while they hide for a moment (a photo carried, a
+     sticker held, choosing), so the page keeps its length */
+  const listBottom = ctlBottom + ctlH + (canLayout || laid > 0 ? 96 : 30);
   /* diary text is set by script whatever language the app is in (see Doc's isCJK): Chinese in the chosen face, the rest in
      Newsreader; a field being typed in takes the face of what is in it */
   const tx = [h.tx, { color: t.ink }];
@@ -463,7 +465,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
         </View>
       ) : (
         <Animated.View style={[StyleSheet.absoluteFill, { top: top + 50, bottom: typing !== null ? kb : 0, opacity: turn }]}>
-        <GHScrollView ref={scroll} scrollEnabled={!dragging} style={{ flex: 1 }} showsVerticalScrollIndicator={false} scrollEventThrottle={16}
+        <GHScrollView ref={scroll} scrollEnabled={!dragging} style={h.scroller} showsVerticalScrollIndicator={false} scrollEventThrottle={16}
           onScroll={(e) => onScrolled(e.nativeEvent.contentOffset.y)}
           onLayout={(e) => { sized.current.view = e.nativeEvent.layout.height; }}
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
@@ -506,8 +508,11 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           {/* once the page is laid out, every photo of the day stays here at the foot of it, small and numbered */}
           {laid > 0 && tray ? <View style={[h.foot, { borderTopColor: t.gray }]}>{tray}</View> : null}
           {/* the rest of the page: a tap anywhere here starts writing */}
-          {!recording && !making && !select && !choosing && !carried && typing === null ? (
-            <Pressable onPress={() => setTyping('')} style={{ minHeight: nothing ? Dimensions.get('window').height * 0.6 : 260 }} accessibilityLabel={S.writeHint} />
+          {/* it stays (only not tappable) while a photo is carried, recording, grouping or choosing, so the page never
+              changes length under a finger */}
+          {!making && typing === null ? (
+            <Pressable onPress={() => setTyping('')} disabled={recording || select || !!choosing || !!carried}
+              style={{ minHeight: nothing ? Dimensions.get('window').height * 0.6 : 260 }} accessibilityLabel={S.writeHint} />
           ) : null}
         </GHScrollView>
         </Animated.View>
@@ -660,6 +665,9 @@ const h = StyleSheet.create({
   hi: { fontSize: 13, textAlign: 'center' },
   ask: { fontSize: 21, lineHeight: 30, textAlign: 'center' },
   tx: { fontSize: 16, lineHeight: 28 },
+  /* on the web the browser would scroll by itself to keep what is in view still when the page above it changes height
+     (scroll anchoring), moving the page under a carried photo; the phone never does */
+  scroller: { flex: 1, ...(Platform.OS === 'web' ? ({ overflowAnchor: 'none' } as object) : {}) },
   foot: { marginTop: 28, paddingTop: 22, borderTopWidth: StyleSheet.hairlineWidth },   // the thumbnails sit apart from the diary, under a hairline
   trayHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   hint: { fontSize: 13.5, lineHeight: 21 },
