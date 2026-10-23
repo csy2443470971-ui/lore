@@ -323,7 +323,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
             </View>
           ) : null}
 
-          {unlaid.length ? <Stream items={unlaid} onEdit={(i) => edit(laid + i, -1)} /> : null}
+          {unlaid.length ? <Stream items={unlaid} onEdit={(i, part) => edit(laid + i, part)} /> : null}
 
           {livePhotos && reached.length ? <Stream items={[{ kind: 'photos', parts: reached.map((n) => ({ unit: units[n], text: lines[n] || line(n), spoken: spoken(units[n], lines[n] || line(n)) })) }]} /> : null}
           {(real === 'listen' || real === 'tidy') && live ? <Text style={tx}>{live}</Text> : null}
