@@ -249,6 +249,7 @@ function Movable({ id, r, z, W, locked, block, grab, move, drop, open, children 
   open?: (id: string) => void;                     // a tap opens the photo full screen
   children: React.ReactNode;
 }) {
+  const t = useT();
   const x = useSharedValue(r.x), y = useSharedValue(r.y), w = useSharedValue(r.w), h = useSharedValue(r.h);
   const home = useSharedValue(r);                  // where the page keeps it
   const live = useSharedValue(0);                  // the gestures under way, as bits (1 one finger, 2 two)
@@ -319,7 +320,7 @@ function Movable({ id, r, z, W, locked, block, grab, move, drop, open, children 
   }));
   return (
     <GestureDetector gesture={gesture}>
-      <Re.View style={[{ position: 'absolute', zIndex: z }, style]}>
+      <Re.View style={[{ position: 'absolute', zIndex: z, borderRadius: 8, backgroundColor: t.gray }, style]}>
         {/* the photo itself takes no touches: on the web an <img> would start the browser's own image drag */}
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>{children}</View>
       </Re.View>
@@ -486,6 +487,18 @@ function Lifted({ text, top, W, ink, up, down, onAim, onUp, onDown, onShare, onS
   );
 }
 
+/* where a held photo will land: a soft space that moves with the finger by itself, without re-rendering the page */
+type Bus<T> = { on: (f: (v: T) => void) => () => void; emit: (v: T) => void };
+function bus<T>(): Bus<T> {
+  let fn: ((v: T) => void) | null = null;
+  return { on: (f) => { fn = f; return () => { fn = null; }; }, emit: (v) => fn?.(v) };
+}
+function Landing({ hook, color }: { hook: Bus<Rect | null>; color: string }) {
+  const [r, setR] = useState<Rect | null>(null);
+  useEffect(() => hook.on(setR), [hook]);
+  return r ? <View pointerEvents="none" style={[d.landing, { left: r.x, top: r.y, width: r.w, height: r.h, borderColor: color }]} /> : null;
+}
+
 /* how a set of photos sits together: one, a pair, one large with two small, or a 2×2 grid; w is the page width */
 const G = 4;
 function cluster(n: number, w: number): Rect[] {
@@ -591,7 +604,6 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     const idx = m ? (x?.kind === 'photos' ? x.parts[+m[2]]?.unit.idx ?? [] : []) : pl?.find((p) => p.id === key)?.idx ?? [];
     if (idx.length) go?.(idx);
   }, []);
-  const [holding, setHolding] = useState<string | null>(null);   // the photo held now: where it will land shows as a soft space
   const blocks: { spot: Spot; ch: number; tiles: { key: string; pics: Pic[]; r: Rect }[] }[] = [];
   const singles: { key: string; pics: Pic[]; w: number; h: number; at: Pos }[] = [];
   const below: Record<number, number> = {};
@@ -651,25 +663,31 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   /* positions read from an older version are saved once in paragraph and line */
   const freshKey = JSON.stringify(fresh);
   useEffect(() => { for (const [k, at] of JSON.parse(freshKey) as [string, Pos][]) moveTo.current(k, at); }, [freshKey]);
+  const tied = useRef({ tops, starts, height, stickers });
+  useEffect(() => { tied.current = { tops, starts, height, stickers }; });
   /* the photo under the finger: its size on the page when it was picked up */
   const held = useRef({ w: 0, h: 0 });
   /* the words reflow only when the photo's place really changes (its paragraph, line, or some points across), at most once a frame */
   const shown = useRef('');
-  const frame = useRef(0);
-  const place = useCallback((id: string, at: Pos) => {
-    setPicked(null);
+  /* While a photo is held the words don't move at all: the space it was lifted from stays, and a thin outline follows
+     the finger to show where it will land. Only when it is let go do the words reflow, once. Reflowing while it was
+     held (on every line the finger crossed, or whenever it rested) is what made dragging jump about. */
+  const land = useMemo(() => bus<Rect | null>(), []);
+  const place = useCallback((id: string, at: Pos, h: number) => {
     last.current = { id, at };
     const sig = `${id}|${at.p}|${at.k}|${at.x}|${at.w}`;
     if (sig === shown.current) return;
     shown.current = sig;
-    cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
-  }, []);
+    const { starts: ss } = tied.current, n = linesFor(h);
+    land.emit({ x: at.x, y: (ss[at.p ?? 0] ?? 0) + (at.k ?? 0) * lh + e, w: at.w ?? 0, h: n * lh - 2 * e });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lh, e, land]);
   const grab = useCallback((id: string) => {
     held.current = now.current.sizes[id] ?? { w: 0, h: 0 };
     shown.current = ''; last.current = null;
-    setFront(id); setHolding(id);
-  }, []);
+    setPicked(null); setFront(id);
+    land.emit(now.current.rects[id] ?? null);
+  }, [land]);
   const q = (v: number) => Math.round(v / 6) * 6;  // positions kept in steps of 6 points, so the words don't reflow for every pixel
   /* where the held photo is now (its top-left and width, from the gesture): the place the words make for it */
   const move = useCallback((id: string, x: number, y: number, w: number) => {
@@ -680,21 +698,18 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     /* it lands against whichever edge its middle is nearer, or across the page when it is that wide: the words keep to
        one column beside it, and only move when it changes line or side, not with every point of the finger */
     const side = ww >= W * 0.7 ? 0 : x + ww / 2 < W / 2 ? 0 : W - ww;
-    place(id, { x: Math.round(side), y, p: sp.p, k: sp.k, w: ww });
+    place(id, { x: Math.round(side), y, p: sp.p, k: sp.k, w: ww }, h);
   }, [W, lh, size, place]);
   const drop = useCallback(() => {
-    cancelAnimationFrame(frame.current);
+    land.emit(null);
     const lt = last.current;
     if (lt) { setLive((s) => ({ ...s, [lt.id]: lt.at })); moveTo.current(lt.id, lt.at); }
     last.current = null;
-    setHolding(null);
-  }, []);
+  }, [land]);
 
   /* a sticker let go (or just put on): tied to the paragraph its top is in; null throws it away */
   const stuck = useRef(onSticker);
   useEffect(() => { stuck.current = onSticker; });
-  const tied = useRef({ tops, height, stickers });
-  useEffect(() => { tied.current = { tops, height, stickers }; });
   /* a sticker the words go around, while held: the words move out of its way at most once a frame, and only when it has
      moved a few points or turned a few degrees */
   const slider = useRef({ sig: '', frame: 0 });
@@ -721,11 +736,14 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   const tie = useCallback((id: string, at: { x: number; y: number; w: number; r: number } | null) => {
     if (!at) { stuck.current?.(id, null); return; }
     const { tops: ts, height: hh } = tied.current;
-    const y = Math.max(-at.w / 2, Math.min(hh, at.y));
+    /* a sticker stays inside the text area: a part that stuck out past its edges couldn't be touched, so the sticker
+       seemed stuck */
+    const w = Math.min(at.w, W);
+    const y = Math.max(0, Math.min(Math.max(0, hh - w * 0.5), at.y)), x = Math.max(0, Math.min(W - w, at.x));
     let p = 0;
     ts.forEach((tp, i) => { if (tp <= y) p = i; });
-    stuck.current?.(id, { p: ts.length ? p : -1, x: at.x, y: y - (ts[p] ?? 0), w: at.w, r: at.r });
-  }, []);
+    stuck.current?.(id, { p: ts.length ? p : -1, x, y: y - (ts[p] ?? 0), w, r: at.r });
+  }, [W]);
   /* let go: the words stop following the fingers and go around its new place */
   const stick = useCallback((id: string, at: { x: number; y: number; w: number; r: number } | null) => {
     cancelAnimationFrame(slider.current.frame);
@@ -804,9 +822,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
           </React.Fragment>
         ))}
         {lines.map(setLine)}
-        {holding && rects[holding] ? (
-          <View pointerEvents="none" style={[d.landing, { left: rects[holding].x, top: rects[holding].y, width: rects[holding].w, height: rects[holding].h, backgroundColor: t.gray }]} />
-        ) : null}
+        <Landing hook={land} color={t.mut} />
         {tiles.map((tl) => (
           <Movable key={tl.key} id={tl.key} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop} open={onOpen ? openTile : undefined}>
             {tl.pics.length > 1 ? <Fluid pics={tl.pics} />
@@ -914,7 +930,7 @@ function VoiceBar({ bar }: { bar: Bar }) {
 const d = StyleSheet.create({
   head: { position: 'absolute', left: 0, fontSize: 14.5, lineHeight: 20, fontWeight: '600' },
   marker: { position: 'absolute', borderRadius: 3 },
-  landing: { position: 'absolute', borderRadius: 8, opacity: 0.7 },
+  landing: { position: 'absolute', borderRadius: 10, borderWidth: 1.5, borderStyle: 'dashed', zIndex: 1 },
   seg: { position: 'absolute', zIndex: 6, flexDirection: 'row', borderRadius: 17, padding: 3, gap: 2, width: 176, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
   segBtn: { flex: 1, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   dim: { position: 'absolute', left: -40, right: -40, top: -400, bottom: -800, opacity: 0.72, zIndex: 7 },
