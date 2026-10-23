@@ -27,6 +27,7 @@ import { Archive, Insights, Settings } from './src/Screens';
 import { DayMenu } from './src/DayMenu';
 import { Week } from './src/Week';
 import { RangePicker } from './src/Range';
+import { askPlace, wherePlace } from './src/place';
 
 type Mode = 'light' | 'dark' | 'auto';
 type Pane = null | 'archive' | 'insights' | 'settings';
@@ -91,6 +92,7 @@ export default function App() {
   const [grammar, setGrammarState] = useState(true);   // "Fix grammar": on unless the person turns it off
   const [voice, setVoiceState] = useState(true);       // voice bars at the top left of what was said
   const [indent, setIndentState] = useState(false);    // first-line indent on the page
+  const [where, setWhereState] = useState(false);      // record where each day was written
   const [pane, setPane] = useState<Pane>(null);
   const [today, setToday] = useState(() => dayKey());
   const [days, setDays] = useState<Record<string, Day>>(() => ({ [today]: { ...EMPTY, photos: SEED } }));
@@ -102,7 +104,6 @@ export default function App() {
   const [mine, setMine] = useState<string[]>([]);      // stickers made from photos
   const [slap, setSlap] = useState('');                // the sticker just put on the page
   const [menu, setMenu] = useState(false);
-  const [picking, setPicking] = useState(false);       // choosing which day the page belongs to
   const [ready, setReady] = useState(false);
   const saved = useRef<Record<string, Day>>({});
   const [making, setMaking] = useState(false);
@@ -114,7 +115,8 @@ export default function App() {
   const via = useRef<'live' | 'audio'>('audio');      // which one is recording: Apple's recogniser, or expo-audio
 
   useEffect(() => {
-    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice', 'qd-indent']).then((kv) => {
+    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice', 'qd-indent', 'qd-place']).then((kv) => {
+      if (kv[5][1] === '1') setWhereState(true);
       if (kv[4][1] === '1') setIndentState(true);
       if (kv[2][1] === '0') setGrammarState(false);
       if (kv[3][1] === '0') setVoiceState(false);
@@ -127,6 +129,11 @@ export default function App() {
   const setGrammar = (g: boolean) => { setGrammarState(g); AsyncStorage.setItem('qd-grammar', g ? '1' : '0').catch(() => {}); };
   const setVoice = (v: boolean) => { setVoiceState(v); AsyncStorage.setItem('qd-voice', v ? '1' : '0').catch(() => {}); };
   const setIndent = (v: boolean) => { setIndentState(v); AsyncStorage.setItem('qd-indent', v ? '1' : '0').catch(() => {}); };
+  /* turning "Record where you write" on asks for location once; without it the setting stays off */
+  const setWhere = async (v: boolean) => {
+    if (v && !(await askPlace())) { setNotice({ text: S.placeDenied, action: settings }); return; }
+    setWhereState(v); AsyncStorage.setItem('qd-place', v ? '1' : '0').catch(() => {});
+  };
 
   /* the days kept on the phone; the page waits for them, so nothing written first gets overwritten */
   useEffect(() => { loadMine().then(setMine); }, []);
@@ -251,7 +258,7 @@ export default function App() {
       if (r.canceled || !r.assets.length) return;
       const kept = await Promise.all(r.assets.map((a) => keepPhoto(a.uri)));
       update(key, (d) => ({ ...d, photos: [...d.photos, ...kept] }));
-      grow(key);
+      grow(key); note(key);
       Haptics.selectionAsync().catch(() => {});
     } catch { /* picker unavailable */ }
   }
@@ -264,7 +271,7 @@ export default function App() {
       if (r.canceled || !r.assets.length) return;
       const kept = await keepPhoto(r.assets[0].uri);
       update(key, (d) => ({ ...d, photos: [...d.photos, kept] }));
-      grow(key);
+      grow(key); note(key);
     } catch { /* no camera, e.g. the simulator */ }
   }
   /* the camera key: a photo, or a page written on paper (taken now, or chosen from the library) */
@@ -307,7 +314,7 @@ export default function App() {
         ...rest.map((t): Said => ({ kind: 'talk', text: t, g: true, at }))];
       return { ...d, photos: [...d.photos, kept], said: [...d.said.slice(0, d.laid), ...items, ...d.said.slice(d.laid)], laid: d.laid + items.length };
     });
-    grow(key);
+    grow(key); note(key);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   }
 
@@ -360,14 +367,6 @@ export default function App() {
       setNotice({ text: S.dragHint });
       AsyncStorage.setItem('qd-tip-drag', '1').catch(() => {});
     }).catch(() => {});
-  }
-
-  /* the page belongs to another day: everything on it moves there, after what that day already has. Photo numbers,
-     groups, placed photos and where photos were dragged all move along; this day is left empty */
-  function moveDay(from: string, to: string) {
-    if (from === to) return;
-    setDays((all) => ({ ...all, [from]: { ...EMPTY }, [to]: append(all[to] ?? EMPTY, all[from] ?? EMPTY) }));
-    setCur(to);
   }
 
   /* Several days as one page (a trip, a long weekend): the days from first to last, with what is already written on
@@ -445,6 +444,11 @@ export default function App() {
     setCur(first);
   }
   /* writing on a page over several days after its last day: the page now runs to today, unless today has its own page */
+  /* where this day was written, noted once, on its first writing, when the setting is on */
+  function note(key: string) {
+    if (!where || !isDayKey(key) || days[key]?.place) return;
+    wherePlace().then((place) => { if (place) update(key, (d) => (d.place ? d : { ...d, place })); });
+  }
   function grow(key: string) {
     if (!isSpanKey(key)) return;
     const own = days[today];
@@ -592,11 +596,13 @@ export default function App() {
   const monday = shift(today, -((new Date(ty, tm - 1, td).getDay() + 6) % 7));
   const weekKeys: string[] = [];
   for (let k = monday; k <= today; k = shift(k, 1)) if (!weekKeys.includes(links[k] ?? k)) weekKeys.push(links[k] ?? k);
-  const menuOpts = [...[today, yest, before].map((k) => ({ key: k, label: nameOf(k), date: links[k] ? spanName(links[k]) : dateTitle(k, lang).title, has: has(k) })),
-    { key: 'week', label: S.navWeek, date: S.weekLabel, has: weekKeys.some(has) },
-    { key: 'combine', label: S.combine, date: '', has: false },
-    ...(isSpanKey(cur) ? [{ key: 'split', label: S.split, date: '', has: false }] : [])];
+  const menuDays = [before, yest, today].map((k) => ({ key: k, label: k === today ? S.today : String(Number(k.slice(8))), has: has(k) }));
+  const menuRows = [{ key: 'week', label: S.navWeek, date: S.weekLabel }];
+  const menuMore = [{ key: 'combine', label: S.combine }, ...(isSpanKey(cur) ? [{ key: 'split', label: S.split }] : [])];
+  /* the page's own title: what the person called it, or else its date; under it, the date (or weekday) and the place */
   const dated = isSpanKey(cur) ? { title: spanName(cur), meta: S.nDays(spanDays(cur)) } : dateTitle(isDayKey(cur) ? cur : today, lang);
+  const full = lang === 'zh' ? `${dated.title} ${dated.meta}` : `${dated.meta}, ${dated.title}`;
+  const pageMeta = [day.title ? full : dated.meta, day.place].filter(Boolean).join(' · ');
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -613,27 +619,24 @@ export default function App() {
                     labelOf={(k) => (isSpanKey(k) ? spanName(k) : `${dateTitle(k, lang).meta} · ${dateTitle(k, lang).title}`)} />
                 ) : (
                 <Home day={cur} hidden={pane !== null} night={h >= 18 || h < 5}
-                  past={!!entry} title={entry ? entry.when : nameOf(cur)} onTitle={entry ? undefined : () => setMenu(true)} onDate={entry || isSpanKey(cur) ? undefined : () => setPicking(true)} onToday={() => setCur(today)}
-                  pageTitle={entry ? entry.t : dated.title} pageMeta={entry ? '' : dated.meta}
+                  past={!!entry} title={entry ? entry.when : nameOf(cur)} onTitle={entry ? undefined : () => setMenu(true)} onToday={() => setCur(today)}
+                  pageTitle={entry ? entry.t : day.title || dated.title} pageMeta={entry ? '' : pageMeta}
+                  ownTitle={day.title ?? ''} onRename={entry ? undefined : (text: string) => update(cur, (d) => ({ ...d, title: text.trim() || undefined }))}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}
                   onRemove={(idx) => { setPast((m) => ({ ...m, [cur]: [] })); update(cur, (d) => removePhotos(d, idx)); }}
                   said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} indent={indent} onCamera={camera} onPick={pick} onOpen={setPane} onRecord={rec}
-                  onSaved={(x) => { update(cur, (d) => ({ ...d, said: [...d.said, x] })); grow(cur); }} onLayout={layout} onUndo={past[cur]?.length ? undo : undefined} onMerge={mergeUp} onNotice={setNotice}
+                  onSaved={(x) => { update(cur, (d) => ({ ...d, said: [...d.said, x] })); grow(cur); note(cur); }} onLayout={layout} onUndo={past[cur]?.length ? undo : undefined} onMerge={mergeUp} onNotice={setNotice}
                   placed={day.placed} moved={day.moved} onText={editText}
                   onPlace={(idx, at) => { const id = 'p' + Date.now().toString(36); update(cur, (d) => ({ ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } })); }}
                   onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))}
                   stickers={day.stickers} slap={slap} mine={mine} onAddSticker={addSticker} onSticker={moveSticker} onMakeSticker={makeSticker} onPhoto={onPhoto} />
                 )}
-                {menu ? <DayMenu opts={menuOpts} cur={curKey === cur ? cur : curKey} onClose={() => setMenu(false)}
+                {menu ? <DayMenu days={menuDays} rows={menuRows} more={menuMore} cur={curKey === 'week' ? 'week' : curKey} onClose={() => setMenu(false)}
                   onPick={(k) => { setMenu(false); if (k === 'combine') setRanging(true); else if (k === 'split') split(cur); else setCur(k); }} /> : null}
                 {ranging ? <RangePicker today={today} has={has} onClose={() => setRanging(false)} onPick={combine} /> : null}
-                {picking ? (
-                  <DayMenu heading={S.whichDay} cur={cur} onClose={() => setPicking(false)} onPick={(k) => { setPicking(false); moveDay(cur, k); }}
-                    opts={Array.from({ length: 14 }, (_, i) => shift(today, -i)).map((k) => ({ key: k, label: `${dateTitle(k, lang).title}  ${dateTitle(k, lang).meta}`, date: k === today ? S.navToday : k === yest ? S.navYesterday : '', has: has(k) }))} />
-                ) : null}
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
-                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} />
+                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} where={where} setWhere={setWhere} />
                 <Toast notice={notice} onClose={closeNotice} />
               </>
             )}

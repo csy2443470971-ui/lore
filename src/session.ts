@@ -24,7 +24,8 @@ export type Pos = { x: number; y: number; p?: number; k?: number; w?: number };
 export type Sticker = { id: string; s: string; p: number; x: number; y: number; w: number; r: number; wrap?: boolean };
 /* span: a page written over several days (the key is r-<first day>) */
 export type Day = { photos: Pic[]; groups: number[][]; said: Said[]; laid: number; placed?: Placed[]; moved?: Record<string, Pos>;
-  stickers?: Sticker[]; span?: { from: string; to: string } };
+  stickers?: Sticker[]; span?: { from: string; to: string };
+  title?: string; place?: string };   // a title the person gave the page; where it was written
 
 /* photos in order, with each group standing where its first photo was */
 export function unitsOf(count: number, groups: number[][]): Unit[] {

@@ -57,7 +57,7 @@ export async function keepRecording(uri: string): Promise<string> {
 }
 
 type One = { file?: string; seed?: string; uri?: string; r?: number };
-type Stored = { photos?: (One & { orig?: One })[]; groups?: number[][]; said?: Said[]; laid?: number; placed?: Placed[]; moved?: Record<string, Pos>; stickers?: Sticker[]; span?: Day['span'] };
+type Stored = { photos?: (One & { orig?: One })[]; groups?: number[][]; said?: Said[]; laid?: number; placed?: Placed[]; moved?: Record<string, Pos>; stickers?: Sticker[]; span?: Day['span']; title?: string; place?: string };
 const seedOf = (asset: number) => Object.keys(PHOTO).find((k) => PHOTO[k] === asset);
 
 /* sample photos are saved by name, since the bundle's asset numbers change between updates */
@@ -66,7 +66,7 @@ function pack(d: Day): string {
   const photos = d.photos.map((p) => ({ ...one(p), ...(p.orig ? { orig: one(p.orig) } : {}) }));
   const rel = (a: string) => inside(a) ?? a;
   const said = d.said.map((x) => (x.kind === 'head' ? x : { ...x, audio: x.audio && rel(x.audio), more: x.more?.map((r) => ({ ...r, audio: rel(r.audio) })) }));
-  return JSON.stringify({ photos, groups: d.groups, said, laid: d.laid, placed: d.placed, moved: d.moved, stickers: d.stickers, span: d.span });
+  return JSON.stringify({ photos, groups: d.groups, said, laid: d.laid, placed: d.placed, moved: d.moved, stickers: d.stickers, span: d.span, title: d.title, place: d.place });
 }
 function unpack(s: string): Day | null {
   try {
@@ -76,7 +76,7 @@ function unpack(s: string): Day | null {
         : p.seed && PHOTO[p.seed] !== undefined ? { asset: PHOTO[p.seed] } : { uri: p.uri }), ...(p.r ? { r: p.r } : {}),
     });
     const photos: Pic[] = (j.photos ?? []).map((p) => ({ ...one(p), ...(p.orig ? { orig: one(p.orig) } : {}) }));
-    return { photos, groups: j.groups ?? [], said: j.said ?? [], laid: j.laid ?? 0, placed: j.placed, moved: j.moved, stickers: j.stickers, span: j.span };
+    return { photos, groups: j.groups ?? [], said: j.said ?? [], laid: j.laid ?? 0, placed: j.placed, moved: j.moved, stickers: j.stickers, span: j.span, title: j.title, place: j.place };
   } catch {
     return null;
   }

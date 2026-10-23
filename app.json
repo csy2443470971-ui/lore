@@ -71,7 +71,13 @@
           }
         }
       ],
-      "./plugins/with-quoted-bundle-script"
+      "./plugins/with-quoted-bundle-script",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "打开“记录写作地点”后，每天第一次写的时候记下你在哪个街区或城市，写在日期旁边。"
+        }
+      ]
     ],
     "extra": {
       "eas": {
