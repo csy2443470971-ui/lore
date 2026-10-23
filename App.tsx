@@ -684,7 +684,8 @@ export default function App() {
                 {menu ? <DayMenu days={menuDays} rows={menuRows} more={menuMore} cur={curKey === 'week' ? 'week' : curKey} onClose={() => setMenu(false)}
                   onPick={(k) => { setMenu(false); if (k === 'combine') setRanging(true); else if (k === 'split') split(cur); else setCur(k); }} /> : null}
                 {ranging ? <RangePicker today={today} has={has} onClose={() => setRanging(false)} onPick={combine} /> : null}
-                <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')} />
+                <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')}
+                  has={(k) => !!(days[k]?.said.length || days[k]?.photos.length)} onDay={(k) => { setCur(k); setPane(null); }} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
                 <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} font={font} setFont={setFont} fontFetching={fontFetching} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} where={where} setWhere={setWhere} />
                 <Toast notice={notice} onClose={closeNotice} />

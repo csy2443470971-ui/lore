@@ -1,4 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Re, { Easing, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { Animated, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
@@ -48,37 +51,108 @@ function Tag({ k }: { k: Kind }) {
 }
 
 /* ---------- look back: the month first, then everything written, each one labelled ---------- */
-export function Archive({ open, onClose, onEntry, onInsights }: { open: boolean; onClose: () => void; onEntry: (i: number) => void; onInsights: () => void }) {
+/* The month in Look back. Swipe left or right for the month after or before (not past this month); tap the month's name
+   to choose a month, or the year to choose a year, right where the days are. A dot under a day with writing (October
+   2026's sample days keep their sizes by minutes written); a tap on it opens the day. Today is ringed in red. */
+const dayKeyOf = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+function MonthCal({ has, onDay, onEntry }: { has?: (key: string) => boolean; onDay?: (key: string) => void; onEntry: (i: number) => void }) {
+  const t = useT();
+  const S = useS();
+  const face = useFace();
+  const zh = useLang() === 'zh';
+  const now = new Date(), ty = now.getFullYear(), tm = now.getMonth() + 1;
+  const today = dayKeyOf(ty, tm, now.getDate());
+  const [month, setMonth] = useState({ y: ty, m: tm });
+  const [pick, setPick] = useState<'month' | 'year' | null>(null);
+  const canNext = month.y < ty || (month.y === ty && month.m < tm);
+  const go = useCallback((d: number) => setMonth(({ y, m }) => { const n = new Date(y, m - 1 + d, 1); return { y: n.getFullYear(), m: n.getMonth() + 1 }; }), []);
+  /* the days follow the finger a little; let go far enough and the next month slides in from that side */
+  const tx = useSharedValue(0);
+  const swipe = useMemo(() => Gesture.Pan().activeOffsetX([-14, 14]).failOffsetY([-12, 12])
+    .onUpdate((e) => { tx.set(e.translationX * 0.5); })
+    .onEnd((e) => {
+      const d = e.translationX < -60 || e.velocityX < -500 ? 1 : e.translationX > 60 || e.velocityX > 500 ? -1 : 0;
+      if (d === 0 || (d === 1 && !canNext)) { tx.set(withSpring(0, { damping: 20, stiffness: 260 })); return; }
+      scheduleOnRN(go, d);
+      tx.set(d * 60);
+      tx.set(withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) }));
+    }), [tx, go, canNext]);
+  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: tx.get() }], opacity: 1 - Math.min(0.6, Math.abs(tx.get()) / 150) }));
+
+  const sample = month.y === 2026 && month.m === 10;   // the sample journal's month
+  const byDay = (d: number) => (sample ? S.entries.findIndex((e) => e.day === d) : -1);
+  const lead = (new Date(month.y, month.m - 1, 1).getDay() + 6) % 7, n = new Date(month.y, month.m, 0).getDate();
+  const cells: React.ReactNode[] = [];
+  for (let b = 0; b < lead; b++) cells.push(<View key={'b' + b} style={a.cell} />);
+  for (let d = 1; d <= n; d++) {
+    const key = dayKeyOf(month.y, month.m, d), fut = key > today, isToday = key === today;
+    const mins = sample ? MONTH_MIN[d - 1] ?? 0 : 0, wrote = !!has?.(key);
+    const size = mins ? Math.min(26, 8 + mins * 2.2) : wrote ? 9 : 3;
+    const open = byDay(d) >= 0 ? () => onEntry(byDay(d)) : wrote && onDay ? () => onDay(key) : undefined;
+    cells.push(
+      <Pressable key={d} disabled={!open} onPress={open} style={a.cell}>
+        <Text style={[a.cn, { color: isToday ? t.red : fut ? t.strike : t.mut, fontWeight: isToday ? '600' : '400' }]}>{d}</Text>
+        <View style={a.dotBox}>
+          {!fut && <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: mins || wrote ? t.ink : t.gray }} />}
+          {isToday && <View style={[a.todayRing, { borderColor: t.red, width: size + 8, height: size + 8, borderRadius: (size + 8) / 2 }]} />}
+        </View>
+      </Pressable>
+    );
+  }
+  const chip = (key: string | number, label: string, on: boolean, off: boolean, press: () => void) => (
+    <Pressable key={key} disabled={off} onPress={press} style={({ pressed }) => [a.pickCell, { opacity: off ? 0.3 : pressed ? 0.6 : 1 }]}>
+      <View style={[a.pickChip, on && { backgroundColor: t.pill }]}>
+        <Text style={{ fontSize: 14.5, color: on ? t.pillText : t.ink, fontFamily: face.body }}>{label}</Text>
+      </View>
+    </Pressable>
+  );
+  const years = Array.from({ length: 6 }, (_, i) => ty - 5 + i);
+  return (
+    <>
+      <View style={a.hRow}>
+        <Pressable onPress={() => setPick(pick === 'month' ? null : 'month')} hitSlop={8} style={a.hBtn}>
+          <Text style={[zh ? a.h3 : a.h3en, { color: t.ink, fontFamily: face.title }]}>{S.months[month.m - 1]}</Text>
+          <Text style={[a.caret, { color: t.mut }]}>▾</Text>
+        </Pressable>
+        <Pressable onPress={() => setPick(pick === 'year' ? null : 'year')} hitSlop={8} style={a.hBtn}>
+          <Text style={{ fontSize: 14, color: pick === 'year' ? t.ink : t.mut }}>{zh ? `${month.y} 年` : String(month.y)}</Text>
+          <Text style={[a.caret, { color: t.mut }]}>▾</Text>
+        </Pressable>
+      </View>
+      {pick === 'month' ? (
+        <View style={a.pick}>
+          {S.months.map((label, i) => chip(i, label, i + 1 === month.m, month.y === ty && i + 1 > tm, () => { setMonth({ y: month.y, m: i + 1 }); setPick(null); }))}
+        </View>
+      ) : pick === 'year' ? (
+        <View style={a.pick}>
+          {years.map((y) => chip(y, zh ? `${y} 年` : String(y), y === month.y, false, () => { setMonth({ y, m: y === ty ? Math.min(month.m, tm) : month.m }); setPick(null); }))}
+        </View>
+      ) : (
+        <GestureDetector gesture={swipe}>
+          <Re.View style={[a.cal, slide]}>
+            {S.wd.map((d, i) => <Text key={i} style={[a.wd, { color: t.mut }]}>{d}</Text>)}
+            {cells}
+          </Re.View>
+        </GestureDetector>
+      )}
+    </>
+  );
+}
+
+export function Archive({ open, onClose, onEntry, onInsights, has, onDay }: {
+  open: boolean; onClose: () => void; onEntry: (i: number) => void; onInsights: () => void;
+  has?: (key: string) => boolean; onDay?: (key: string) => void;   // which days have writing, and opening one
+}) {
   const t = useT();
   const S = useS();
   const face = useFace();
   const ins = useSafeAreaInsets();
   const [kind, setKind] = useState<'all' | Kind>('all');
-  const byDay = (d: number) => S.entries.findIndex((e) => e.day === d);
-  const cells: React.ReactNode[] = [];
-  for (let b = 0; b < 3; b++) cells.push(<View key={'b' + b} style={a.cell} />);
-  for (let d = 1; d <= 31; d++) {
-    const m = MONTH_MIN[d - 1] ?? 0, fut = d > 17, today = d === 17;
-    const size = m ? Math.min(26, 8 + m * 2.2) : 3;
-    cells.push(
-      <Pressable key={d} disabled={byDay(d) < 0} onPress={() => onEntry(byDay(d))} style={a.cell}>
-        <Text style={[a.cn, { color: today ? t.red : fut ? t.strike : t.mut, fontWeight: today ? '600' : '400' }]}>{d}</Text>
-        <View style={a.dotBox}>
-          {!fut && <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: m ? t.ink : t.gray }} />}
-          {today && <View style={[a.todayRing, { borderColor: t.red, width: size + 8, height: size + 8, borderRadius: (size + 8) / 2 }]} />}
-        </View>
-      </Pressable>
-    );
-  }
   const list = S.entries.map((e, i) => ({ e, i })).filter(({ e }) => kind === 'all' || e.k === kind);
   return (
     <Panel open={open} onBack={onClose} top={<><Round icon="back" label={S.back} onPress={onClose} /><Text style={[us.topLbl, { color: t.ink }]}>{S.look}</Text><View style={{ width: 36 }} /></>}>
       <ScrollView contentContainerStyle={{ padding: SZ.px, paddingTop: 24, paddingBottom: ins.bottom + 40 }} showsVerticalScrollIndicator={false}>
-        <Heading title={S.monthTitle} side={S.monthSub} />
-        <View style={a.cal}>
-          {S.wd.map((d, i) => <Text key={i} style={[a.wd, { color: t.mut }]}>{d}</Text>)}
-          {cells}
-        </View>
+        <MonthCal has={has} onDay={onDay} onEntry={onEntry} />
 
         <Pressable onPress={onInsights} style={({ pressed }) => [a.gen, { backgroundColor: t.b, opacity: pressed ? 0.7 : 1 }]}>
           <Text style={{ fontSize: 15, color: t.ink }}>✦</Text>
@@ -295,6 +369,11 @@ export function Settings({ open, onClose, mode, setMode, lang, setLang, font, se
 
 const a = StyleSheet.create({
   hRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 },
+  hBtn: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
+  caret: { fontSize: 12 },
+  pick: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 18 },
+  pickCell: { width: '33.333%', height: 52, alignItems: 'center', justifyContent: 'center' },
+  pickChip: { height: 40, minWidth: 84, paddingHorizontal: 14, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   h3: { fontSize: 26, lineHeight: 36 },
   h3en: { fontSize: 30, lineHeight: 36, letterSpacing: -0.3 },
   lede: { fontSize: 16.5, lineHeight: 25, marginTop: 8 },
