@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dimensions, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Re, { SharedValue, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Re, { SharedValue, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
@@ -102,6 +102,7 @@ type Line = { x: number; y: number; w: number; p: number; toks: Tok[]; last: boo
 type Spot = { key: string; x: number; w: number; p: number; k: number; n: number };
 
 const PAD = 9;                                    // the space between a photo and the words, the same on every side
+const HEADW = 150;                                // the room a paragraph's heading and time (or voice bar) need beside a photo
 
 const adv = (m: Metric, size: number, s: string) => {
   let w = 0;
@@ -128,8 +129,8 @@ function cuts(word: string): number[] {
   return breaks.get(word)!;
 }
 
-/* A photo belongs to one paragraph and covers whole lines, so it never runs into the next paragraph (which starts
-   below it) and its edges sit PAD from the ink of the lines above and below, as they do from the words beside it. */
+/* A photo belongs to one paragraph and covers whole lines, so its edges sit PAD from the ink of the lines above and below,
+   as they do from the words beside it; when it is taller than its words, the next paragraph goes on beside it. */
 /* heads: room kept above each paragraph for its time heading and voice bar; tops: where that room starts */
 /* indent: how far the first line of each paragraph starts in (0 when first-line indent is off) */
 /* a sticker the words go around: the points of its outline, turned as it is, x across the page and y down from the top
@@ -142,18 +143,48 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
   /* bottoms: where each paragraph's words and photos end; rowTops: where the photos between a paragraph and the one
      before it start (rowsAt: how much room they take, the gap after them included) */
   const bottoms: number[] = [], rowTops: number[] = [];
+  const headX: number[] = [];                     // where each paragraph's heading and time start (past a photo on the left)
   const rects: Record<string, Rect> = {};
   let y = 0;
+  /* photos that reach below the end of their own paragraph: the next paragraphs' words go on around them, so a photo
+     never leaves an empty space beside it */
+  let hanging: { sp: Spot; y0: number; y1: number }[] = [];
   paras.forEach((para, pi) => {
+    if (rowsAt[pi]) { for (const o of hanging) y = Math.max(y, o.y1 - e + gap); hanging = []; }   // a row of photos goes below them
     rowTops[pi] = y; y += rowsAt[pi] ?? 0;
+    /* A photo hanging on the left: the heading and time start just past it, with the words, which go on beside it. When
+       it would sit beside fewer than two of the words' lines, or leave too little room for the heading, the paragraph
+       starts below it instead, so a heading is never set off from its own words. */
+    let hx = 0;
+    const left = hanging.filter((o) => o.sp.x < width / 2 && o.y1 > y);
+    if (left.length) {
+      const low = Math.max(...left.map((o) => o.y1)), text = y + (heads[pi] ?? 0);
+      hx = Math.max(...left.map((o) => o.sp.x + o.sp.w + PAD));
+      const crowded = hanging.some((o) => o.sp.x >= width / 2 && o.y1 > y && o.y0 < text && o.sp.x < hx + HEADW);
+      if (low - text < 2 * lh || width - hx < HEADW || crowded) { y = Math.max(y, low - e + gap); hx = 0; }
+    }
+    headX.push(hx);
     tops.push(y);
     const start = y + (heads[pi] ?? 0);
     starts.push(start);
-    const own = spots.filter((sp) => sp.p === pi).map((sp) => ({ sp, y0: start + sp.k * lh, y1: start + (sp.k + sp.n) * lh }));
+    /* a photo never sits on another: one that would (a photo hanging from above on the same side, or one put there
+       before it) goes down to just below it */
+    const own: { sp: Spot; y0: number; y1: number }[] = [];
+    for (const sp0 of spots.filter((sp) => sp.p === pi)) {
+      let k = sp0.k;
+      for (let pass = 0; pass < 6; pass++) {
+        const y0 = start + k * lh, y1 = y0 + sp0.n * lh;
+        const hit = [...hanging, ...own].find((o) => sp0.x < o.sp.x + o.sp.w && sp0.x + sp0.w > o.sp.x && y0 < o.y1 && y1 > o.y0);
+        if (!hit) break;
+        k = Math.ceil((hit.y1 - start) / lh);
+      }
+      own.push({ sp: k === sp0.k ? sp0 : { ...sp0, k }, y0: start + k * lh, y1: start + (k + sp0.n) * lh });
+    }
     for (const { sp, y0 } of own) rects[sp.key] = { x: sp.x, y: y0 + e, w: sp.w, h: sp.n * lh - 2 * e };
+    const beside = [...hanging, ...own];           // the photos these lines go around: its own, and ones hanging from above
     const free = (ly: number) => {
       let segs: [number, number][] = [[0, width]];
-      for (const { sp, y0, y1 } of own) {
+      for (const { sp, y0, y1 } of beside) {
         if (y1 <= ly || y0 >= ly + lh) continue;
         const a = sp.x - PAD, b = sp.x + sp.w + PAD;
         /* the words go down the wider side only, so a line never jumps across a photo in the middle */
@@ -219,21 +250,25 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
     }
     if (lines.length > first) lines[lines.length - 1].last = true;
     rows.push(Math.round((ly - start) / lh));
-    const bottom = Math.max(ly, ...own.map((o) => o.y1));
-    bottoms.push(bottom);
-    y = bottom + gap;
+    bottoms.push(ly);
+    y = ly + gap;
+    hanging = beside.filter((o) => o.y1 > y);
   });
+  if (rowsAt[paras.length]) for (const o of hanging) y = Math.max(y, o.y1 - e + gap);
   rowTops[paras.length] = y; y += rowsAt[paras.length] ?? 0;
-  return { lines, starts, rows, rects, tops, bottoms, rowTops, height: Math.max(0, y - gap) };
+  return { lines, starts, rows, rects, tops, bottoms, rowTops, headX, height: Math.max(0, y - gap, ...hanging.map((o) => o.y1)) };
 }
 
-/* a photo let go with its top-left at (x, y): the paragraph its top falls in, the nearest line, and the whole number
-   of lines its height rounds to; near an edge it moves to the edge */
+/* a photo let go with its top-left at (x, y): its top goes level with the nearest line of words on the page (the
+   paragraph and line), and it is the whole number of lines its height rounds to; near an edge it moves to the edge */
 function toSpot(key: string, x: number, y: number, w: number, h: number, base: { starts: number[]; rows: number[] }, W: number, lh: number, size: number): Spot {
   const e = PAD - (lh - size) / 2;
-  let p = 0;
-  base.starts.forEach((st, i) => { if (st <= y + lh / 2) p = i; });
-  const k = Math.max(0, Math.min(Math.max(0, (base.rows[p] ?? 1) - 1), Math.round((y - e - (base.starts[p] ?? 0)) / lh)));
+  let p = 0, k = 0, best = Infinity;
+  base.starts.forEach((st, i) => {
+    const kk = Math.max(0, Math.min(Math.max(0, (base.rows[i] ?? 1) - 1), Math.round((y - e - st) / lh)));
+    const dd = Math.abs(st + kk * lh + e - y);
+    if (dd < best) { best = dd; p = i; k = kk; }
+  });
   const sx = x < 24 ? 0 : x > W - w - 24 ? W - w : x;
   return { key, x: Math.max(0, Math.min(W - w, sx)), w, p, k, n: Math.max(2, Math.round((h + 2 * e) / lh)) };
 }
@@ -288,38 +323,52 @@ export const soloFor = (r: number, w: number): Rect => {
 const GT = 6;
 function rowOf(rs: number[], W: number) {
   const sum = rs.reduce((a, r) => a + 1 / r, 0);
-  const h = Math.min(Math.round((W - GT * (rs.length - 1)) / sum), Math.round(Math.min(340, W * 1.1)));
+  const h = Math.min(Math.round((W - GT * (rs.length - 1)) / sum), Math.round(Math.min(300, W * 0.9)));
   const ws = rs.map((r) => Math.round(h / r));
   const total = ws.reduce((a, b) => a + b, 0) + GT * (rs.length - 1);
   return { h, ws, x0: Math.round((W - total) / 2) };
 }
-/* the gap between two paragraphs a photo's middle is over (0 before the first, the count after the last), or -1 when it
-   is over the words: a little into the words on either side counts, so a photo is easy to put between them */
-function boundaryAt(base: { tops: number[]; bottoms: number[] }, cy: number, near = 14): number {
+/* the gap between two paragraphs the finger is in (0 before the first, the count after the last), or -1 when it is over
+   the words: the white space between the last line above and the first line below, the heading and time included.
+   It goes by the finger, not the photo, so a photo goes between two paragraphs where the finger is between them and
+   beside the words where the finger is on them, even beside a paragraph's last lines. */
+function boundaryAt(base: { tops: number[]; bottoms: number[]; starts: number[] }, cy: number): number {
   const P = base.bottoms.length;
   let best = -1, bd = Infinity;
   for (let b = 0; b <= P; b++) {
-    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - near;
-    const hi = b === P ? Infinity : base.tops[b] + 4;
+    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - 4;
+    const hi = b === P ? Infinity : base.starts[b] + 6;
     if (cy < lo || cy > hi) continue;
-    const mid = ((b === 0 ? (base.tops[0] ?? 0) - 20 : base.bottoms[b - 1]) + (b === P ? (base.bottoms[P - 1] ?? 0) + 20 : base.tops[b])) / 2;
+    const mid = ((b === 0 ? (base.tops[0] ?? 0) - 20 : base.bottoms[b - 1]) + (b === P ? (base.bottoms[P - 1] ?? 0) + 20 : base.starts[b])) / 2;
     const dd = Math.abs(cy - mid);
     if (dd < bd) { bd = dd; best = b; }
   }
   return best;
 }
 
-/* one photo (or group) on the page: one finger drags it anywhere, two make it bigger or smaller (from its top-left
-   corner, between a quarter of the page and all of it). While it is held the page hears where it is, a few times a
-   frame at most, and makes room for it; let go, it settles into the place the words left for it. When the words move
-   it (another photo was dragged, the page was laid out again) it glides to its new place. */
+/* how long a photo or sticker is held before it moves with the finger: a quick swipe over one scrolls the page instead */
+const HOLD = 200;
+/* the page scrolled by itself under a held photo (near the top or bottom of the screen): by how much, and which photo */
+type Shove = { id: string; dy: number; n: number };
+
+/* One photo (or group) on the page. Held a moment, it moves with the finger right where it is (it doesn't lift); two
+   fingers make it bigger or smaller. While it is held the page hears where it is, a few times a frame at most, and makes
+   room for it, and the photo takes the size it will have there (its own beside the words, the row's between two
+   paragraphs), growing or shrinking around the point the finger holds, so it stays under the finger. Over the gap
+   between two paragraphs it goes into the row there at once and sits in it, lined up with the words, until the finger
+   moves on. Let go, it settles into the place the words left for it. When the words move it (another photo was dragged, the page was laid out
+   again) it glides to its new place. */
 const Movable = React.memo(MovableIn, (a, b) => a.id === b.id && a.r.x === b.r.x && a.r.y === b.r.y && a.r.w === b.r.w && a.r.h === b.r.h
-  && a.z === b.z && a.W === b.W && a.locked === b.locked && a.block === b.block && a.pk === b.pk && a.grab === b.grab && a.move === b.move && a.drop === b.drop && !!a.open === !!b.open && a.two === b.two);
-function MovableIn({ id, r, z, W, locked, block, grab, move, drop, open, two, children }: {
-  two: SharedValue<Two>;
+  && a.z === b.z && a.W === b.W && a.locked === b.locked && a.block === b.block && a.pk === b.pk && a.grab === b.grab && a.move === b.move && a.drop === b.drop && !!a.open === !!b.open && a.two === b.two && a.shove === b.shove && a.slot === b.slot);
+function MovableIn({ id, r, slot, z, W, locked, block, grab, move, drop, open, two, shove, children }: {
+  two: SharedValue<Two>; shove: SharedValue<Shove>;
+  slot?: boolean;                                  // its place is in a row between two paragraphs
   pk: string;                                      // which photos it shows: it redraws only when these or its place change
   id: string; r: Rect; z: number; W: number; locked?: boolean; block?: React.RefObject<unknown>;
-  grab: (id: string) => void; move: (id: string, x: number, y: number, w: number) => void; drop: () => void;
+  grab: (id: string) => void; drop: () => void;
+  /* where it is held: the finger on the page, the point of the photo it holds (as fractions), the width the person gave
+     it, and the finger on the screen (-1 when it didn't move) */
+  move: (id: string, gx: number, gy: number, fx: number, fy: number, want: number, sy: number) => void;
   open?: (id: string) => void;                     // a tap opens the photo full screen
   children: React.ReactNode;
 }) {
@@ -327,81 +376,122 @@ function MovableIn({ id, r, z, W, locked, block, grab, move, drop, open, two, ch
   const x = useSharedValue(r.x), y = useSharedValue(r.y), w = useSharedValue(r.w), h = useSharedValue(r.h);
   const home = useSharedValue(r);                  // where the page keeps it
   const live = useSharedValue(0);                  // the gestures under way, as bits (1 one finger, 2 two)
+  /* while it is held: the finger's point on the page, where on the photo it holds it, and the width it has been given */
+  const px = useSharedValue(0), py = useSharedValue(0), fx = useSharedValue(0.5), fy = useSharedValue(0.5), want = useSharedValue(r.w);
+  const sits = useSharedValue(0);                  // held: 0 under the finger, 1 sitting in its place in a row (and between, on the way)
   const size = useSharedValue({ w: 0, h: 0 });
-  const far = useSharedValue({ w: 0, h: 0 });     // its size when a second finger came down elsewhere on the page   // its size when two fingers came down
+  const far = useSharedValue({ w: 0, h: 0 });     // its size when a second finger came down elsewhere on the page
   const last = useSharedValue({ x: 0, y: 0, n: 0 });   // the finger's last position and how many fingers were down
   /* the page's handlers reach the gesture through a ref, so a re-render of the page never rebuilds a gesture under way */
   const cb = useRef({ grab, move, drop, open });
   useEffect(() => { cb.current = { grab, move, drop, open }; });
   const onOpen = useCallback((k: string) => cb.current.open?.(k), []);
   const onGrab = useCallback((k: string) => cb.current.grab(k), []);
-  const onMove = useCallback((k: string, a: number, b: number, c: number) => cb.current.move(k, a, b, c), []);
+  const onMove = useCallback((k: string, a: number, b: number, c: number, dd: number, ee: number, ff: number) => cb.current.move(k, a, b, c, dd, ee, ff), []);
   const onDrop = useCallback(() => cb.current.drop(), []);
   useEffect(() => {
     const to = { x: r.x, y: r.y, w: r.w, h: r.h };
     home.set(to);
-    if (live.get() === 0) { x.set(withSpring(to.x, SPRING)); y.set(withSpring(to.y, SPRING)); w.set(withSpring(to.w, SPRING)); h.set(withSpring(to.h, SPRING)); }
-  }, [r.x, r.y, r.w, r.h, home, live, x, y, w, h]);
+    const held = live.get();
+    if (held === 0) { sits.set(0); x.set(withSpring(to.x, SPRING)); y.set(withSpring(to.y, SPRING)); w.set(withSpring(to.w, SPRING)); h.set(withSpring(to.h, SPRING)); return; }
+    if (held !== 1 || two.get().on) return;        // two fingers are sizing it
+    w.set(withSpring(to.w, SPRING)); h.set(withSpring(to.h, SPRING));   // held by one finger: the size it will land at
+    if (slot) {
+      /* into the row: from where it is on the screen now */
+      if (sits.get() < 0.01) {
+        const ww = w.get(), hh = h.get();
+        x.set(Math.max(0, Math.min(W - ww, px.get() - fx.get() * ww))); y.set(Math.max(0, py.get() - fy.get() * hh));
+      }
+      x.set(withSpring(to.x, SPRING)); y.set(withSpring(to.y, SPRING));
+      sits.set(withTiming(1, { duration: 160 }));
+    } else sits.set(withTiming(0, { duration: 160 }));
+  }, [r.x, r.y, r.w, r.h, slot, W, home, live, two, sits, px, py, fx, fy, x, y, w, h]);
   /* eslint-disable react-hooks/refs -- the gesture's callbacks run during a gesture, on the UI thread, never while rendering */
   const gesture = useMemo(() => {
-    /* each gesture marks itself on when it starts and off when it is over in any way (onFinalize always runs, even when a
-       gesture is cancelled), so the photo can never be left thinking it is still held */
-    const begin = (bit: number) => {
+    const report = (sy: number) => {
       'worklet';
-      if (live.get() === 0) scheduleOnRN(onGrab, id);
+      scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), want.get(), sy);
+    };
+    /* each gesture marks itself on when it starts and off when it is over in any way (onFinalize always runs, even when a
+       gesture is cancelled), so the photo can never be left thinking it is still held. The first one takes hold of the
+       photo at the point under the finger(s). */
+    const begin = (bit: number, ax: number, ay: number) => {
+      'worklet';
+      if (live.get() === 0) {
+        const ww = w.get(), hh = h.get();
+        fx.set(Math.max(0, Math.min(1, ax / ww))); fy.set(Math.max(0, Math.min(1, ay / hh)));
+        px.set(x.get() + ax); py.set(y.get() + ay); want.set(home.get().w);
+        scheduleOnRN(onGrab, id);
+      }
       live.set(live.get() | bit);
       if (two.get().id !== id) two.set({ ...NO_TWO, id });
     };
     const end = (bit: number) => {
       'worklet';
       if (!(live.get() & bit)) return;
-      live.set(live.get() & ~bit);
-      if (live.get() !== 0) return;
+      const rest = live.get() & ~bit;
+      if (rest !== 0) { live.set(rest); return; }
       if (two.get().id === id) two.set(NO_TWO);
+      /* from where it is on the screen now, it settles into its place */
+      const ww = w.get(), hh = h.get(), k = sits.get();
+      const fl = Math.max(0, Math.min(W - ww, px.get() - fx.get() * ww)), ft = Math.max(0, py.get() - fy.get() * hh);
+      x.set(fl + (x.get() - fl) * k); y.set(ft + (y.get() - ft) * k);
+      sits.set(0);
+      live.set(0);
       scheduleOnRN(onDrop);
       const to = home.get();
       x.set(withSpring(to.x, SPRING)); y.set(withSpring(to.y, SPRING)); w.set(withSpring(to.w, SPRING)); h.set(withSpring(to.h, SPRING));
     };
-    /* the photo moves by how far the fingers moved since the last frame; the frame a finger lands or lifts (when their
-       centre jumps) it doesn't move at all, so adding or lifting a finger never makes it jump */
-    /* a finger can't touch down without drifting a few points, so a drag starts only after 8 and a tap may drift 12:
-       with a smaller drag distance most taps on a real screen were taken for drags, and nothing opened. The drag counts
-       from where the finger touched down, so the photo doesn't lag behind it. */
-    const pan = Gesture.Pan().enabled(!locked).minDistance(8).averageTouches(true)
-      .onStart((e) => { last.set({ x: 0, y: 0, n: e.numberOfPointers }); begin(1); two.set({ ...two.get(), x1: e.absoluteX, y1: e.absoluteY }); })
+    /* it moves by how far the fingers moved since the last frame; the frame a finger lands or lifts (when their centre
+       jumps) it doesn't move at all, so adding or lifting a finger never makes it jump */
+    const pan = Gesture.Pan().enabled(!locked).activateAfterLongPress(HOLD).averageTouches(true)
+      .onStart((e) => {
+        last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers });
+        begin(1, e.x, e.y);
+        two.set({ ...two.get(), x1: e.absoluteX, y1: e.absoluteY });
+      })
       .onUpdate((e) => {
         const l = last.get();
         last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers });
         if (two.get().id === id) two.set({ ...two.get(), x1: e.absoluteX, y1: e.absoluteY });
         if (e.numberOfPointers !== l.n) return;
-        const ww = w.get();
-        const nx = Math.max(0, Math.min(W - ww, x.get() + e.translationX - l.x)), ny = Math.max(0, y.get() + e.translationY - l.y);
-        x.set(nx); y.set(ny);
-        scheduleOnRN(onMove, id, nx, ny, ww);
+        px.set(px.get() + e.translationX - l.x); py.set(py.get() + e.translationY - l.y);
+        report(e.absoluteY);
       })
       .onFinalize(() => end(1));
     const pinch = Gesture.Pinch().enabled(!locked)
-      .onStart(() => { size.set({ w: w.get(), h: h.get() }); begin(2); })
+      .onStart((e) => { begin(2, e.focalX, e.focalY); size.set({ w: w.get(), h: h.get() }); })
       .onUpdate((e) => {
-        const s0 = size.get(), nw = Math.max(W * 0.25, Math.min(W, s0.w * e.scale)), nx = Math.min(x.get(), W - nw);
-        w.set(nw); h.set(s0.h * nw / s0.w); x.set(nx);
-        scheduleOnRN(onMove, id, nx, y.get(), nw);
+        const s0 = size.get(), nw = Math.max(W * 0.25, Math.min(W, s0.w * e.scale));
+        want.set(nw); w.set(nw); h.set(s0.h * nw / s0.w);
+        report(-1);
       })
       .onFinalize(() => end(2));
     if (block && Platform.OS !== 'web') { pan.blocksExternalGesture(block as never); pinch.blocksExternalGesture(block as never); }
     const tap = Gesture.Tap().maxDuration(600).maxDistance(12).onEnd((_e, ok) => { if (ok) scheduleOnRN(onOpen, id); });
     return Gesture.Race(tap, Gesture.Simultaneous(pan, pinch));
-  }, [id, W, locked, block, onGrab, onMove, onDrop, onOpen, x, y, w, h, home, live, size, last, two]);
+  }, [id, W, locked, block, onGrab, onMove, onDrop, onOpen, x, y, w, h, home, live, px, py, fx, fy, want, sits, size, last, two]);
   /* a second finger elsewhere on the page: the photo grows or shrinks by how far apart the two fingers are */
-  useAnimatedReaction(() => { const t = two.get(); return t.on && t.id === id ? spread(t) : 0; }, (s) => {
+  useAnimatedReaction(() => { const tt = two.get(); return tt.on && tt.id === id ? spread(tt) : 0; }, (s) => {
     if (!s) { far.set({ w: 0, h: 0 }); return; }
     if (!far.get().w) far.set({ w: w.get(), h: h.get() });
-    const f = far.get(), nw = Math.max(W * 0.25, Math.min(W, f.w * s)), nx = Math.min(x.get(), W - nw);
-    w.set(nw); h.set(f.h * nw / f.w); x.set(nx);
-    scheduleOnRN(onMove, id, nx, y.get(), nw);
+    const f = far.get(), nw = Math.max(W * 0.25, Math.min(W, f.w * s));
+    want.set(nw); w.set(nw); h.set(f.h * nw / f.w);
+    scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), nw, -1);
   }, [id, W]);
+  /* the page scrolled by itself under it: it moves down the page as far, so it stays under the finger */
+  useAnimatedReaction(() => shove.get(), (s, prev) => {
+    if (!prev || s.n === prev.n || s.id !== id || live.get() === 0) return;
+    py.set(py.get() + s.dy);
+    scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), want.get(), -1);
+  }, [id]);
   /* eslint-enable react-hooks/refs */
-  const style = useAnimatedStyle(() => ({ left: x.get(), top: y.get(), width: w.get(), height: h.get() }));
+  const style = useAnimatedStyle(() => {
+    const ww = w.get(), hh = h.get();
+    if (live.get() === 0) return { left: x.get(), top: y.get(), width: ww, height: hh };
+    const fl = Math.max(0, Math.min(W - ww, px.get() - fx.get() * ww)), ft = Math.max(0, py.get() - fy.get() * hh), k = sits.get();
+    return { left: fl + (x.get() - fl) * k, top: ft + (y.get() - ft) * k, width: ww, height: hh };
+  });
   return (
     <GestureDetector gesture={gesture}>
       <Re.View style={[{ position: 'absolute', zIndex: z, borderRadius: 8, backgroundColor: t.gray }, style]}>
@@ -486,11 +576,9 @@ function StuckIn({ st, top, W, source, slap, locked, bin, block, place, carry, s
       bx.set(nx); by.set(ny); bw.set(Math.round(w2)); br.set(nr); dx.set(0); dy.set(0); sc.set(1); rot.set(0);
       scheduleOnRN(onPlace, id, { x: nx, y: ny, w: Math.round(w2), r: nr });
     };
-    /* a finger can't touch down without drifting a few points, so a drag starts only after 8 and a tap may drift 12:
-       with a smaller drag distance most taps on a real screen were taken for drags, and nothing opened. The drag counts
-       from where the finger touched down, so the photo doesn't lag behind it. */
-    const pan = Gesture.Pan().enabled(!locked).minDistance(8).averageTouches(true)
-      .onStart((e) => { last.set({ x: 0, y: 0, n: e.numberOfPointers }); begin(1); two.set({ ...two.get(), x1: e.absoluteX, y1: e.absoluteY }); })
+    /* held a moment before it moves, like a photo, so a swipe that starts on it scrolls the page */
+    const pan = Gesture.Pan().enabled(!locked).activateAfterLongPress(HOLD).averageTouches(true)
+      .onStart((e) => { last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers }); begin(1); two.set({ ...two.get(), x1: e.absoluteX, y1: e.absoluteY }); })
       .onUpdate((e) => {
         const l = last.get();
         last.set({ x: e.translationX, y: e.translationY, n: e.numberOfPointers });
@@ -618,12 +706,15 @@ function cluster(n: number, w: number): Rect[] {
 type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
 /* what the page offers the screen for a photo carried in from the bottom of the page */
 export type PageApi = {
-  carry: (c: { x: number; y: number; w: number; h: number } | null, lift?: number[]) => void;   // top-left and size over the page, or null when it is gone; lift: the photos carried, which leave their place on the page meanwhile
+  carry: (c: { x: number; y: number; w: number; h: number; gx: number; gy: number } | null, lift?: number[]) => void;   // top-left, size and the finger over the page, or null when it is gone; lift: the photos carried, which leave their place on the page meanwhile
   landing: () => { at: Pos; rect: Rect } | null;                                // where it would land: the place to keep, and its rectangle on the page
+  nudge: (dy: number) => void;                                                  // the page scrolled by itself under a photo held on it
 };
-export function Page({ items, photos, placed, moved, api, voice, indent, onRename, ownTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
+export function Page({ items, photos, placed, moved, api, onEdge, onPreview, voice, indent, onRename, ownTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
   items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>;
   api?: React.MutableRefObject<PageApi | null>;                  // for a photo carried in from the bottom: where it is over the page, and where it would land
+  onEdge?: (y: number | null) => void;                           // a photo held on the page: the finger on the screen (so the page can scroll near the edges), null when let go
+  onPreview?: (r: (Rect & { row: boolean }) | null) => void;     // where a photo carried in from the bottom would land (on the page), and whether in a row
   voice?: boolean;                                                // voice bars at the top left of what was said (a setting)
   indent?: boolean;                                               // first-line indent (a setting)
   onRename?: (text: string) => void; ownTitle?: string;          // the title is renamed right where it is (empty: the date again)
@@ -693,8 +784,17 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
 
   /* each set that hasn't been taken apart is one block beside the start of its paragraph (the next set of the same
      paragraph below it), sets alternating right and left; its tiles are stretched to the block's whole lines */
-  const [live, setLive] = useState<Record<string, Pos>>({});      // positions changed since this page was opened
+  /* positions changed by the fingers, over the saved ones they were changed from: once the saved ones change (the change
+     was kept, or Undo or Lay out again put the photos somewhere else) they no longer count */
+  const [liveSt, setLiveSt] = useState<{ of?: Record<string, Pos>; at: Record<string, Pos> }>({ at: {} });
+  const live = liveSt.of === moved ? liveSt.at : {};
   const pos: Record<string, Pos> = { ...moved, ...live };
+  const movedNow = useRef(moved);
+  useEffect(() => { movedNow.current = moved; });
+  const setLive = useCallback((f: (s: Record<string, Pos>) => Record<string, Pos>) => {
+    const of = movedNow.current;
+    setLiveSt((st) => ({ of, at: f(st.of === of ? st.at : {}) }));
+  }, []);
   const [front, setFront] = useState('');           // the photo picked up last sits above the others
   const two = useSharedValue<Two>(NO_TWO);
   const [holding, setHolding] = useState<string | null>(null);   // a photo or sticker is held: the clear layer for a second finger is down
@@ -809,7 +909,7 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
     return sp;
   };
   const spots = [...blocks.map((b) => b.spot), ...singles.map((sg) => spotOf(sg, fresh))];
-  const { lines, rects, tops, starts, rows: lineRows, bottoms, rowTops, height } = run(spots, A.rowsAt);
+  const { lines, rects, tops, starts, rows: lineRows, bottoms, rowTops, headX, height } = run(spots, A.rowsAt);
   const brects = betweenRects(A, rowTops);
   /* where a finger is on the page is turned into a paragraph and line, or a gap between paragraphs, against the page as
      it stands with every photo in its place except the one being held. (Measured against the page without the photos
@@ -817,7 +917,7 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
   const B = front ? assemble(front) : A;
   const others = front
     ? run([...B.blocks.map((b) => b.spot), ...B.singles.map((sg) => spotOf(sg))], B.rowsAt)
-    : { lines, rects, tops, starts, rows: lineRows, bottoms, rowTops, height };
+    : { lines, rects, tops, starts, rows: lineRows, bottoms, rowTops, headX, height };
   const obrects = front ? betweenRects(B, others.rowTops) : brects;
   const [naming, setNaming] = useState<string | null>(null);   // the title being renamed, in place
   const [lifted, setLifted] = useState<number | null>(null);   // the paragraph held up by a long press
@@ -832,20 +932,21 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
   const previewRect = rects.preview ?? brects.preview;
 
   /* where each photo was when the finger went down; read only inside the gesture handlers */
-  type Round = { rects: Record<string, Rect>; base: typeof others; sizes: Record<string, { w: number; h: number }>;
+  type Round = { rects: Record<string, Rect>; base: typeof others; sizes: Record<string, { w: number; h: number }>; ratios: Record<string, number>;
     brow: Assembled['brow']; brects: Record<string, Rect>; between: Record<string, boolean> };
-  const now = useRef<Round>({ rects: {}, base: others, sizes: {}, brow: A.brow, brects: {}, between: {} });
+  const now = useRef<Round>({ rects: {}, base: others, sizes: {}, ratios: {}, brow: A.brow, brects: {}, between: {} });
   const last = useRef<{ id: string; at: Pos } | null>(null);
   const moveTo = useRef(onMove);
   useEffect(() => {
     const sizes: Record<string, { w: number; h: number }> = {};
     for (const sg of singles) sizes[sg.key] = { w: sg.w, h: sg.h };
     for (const tl of tiles) sizes[tl.key] = { w: tl.r.w, h: tl.r.h };
+    const ratios = Object.fromEntries(tiles.map((tl) => [tl.key, ratioOf(tl.pics)]));
     const between: Record<string, boolean> = {};
     for (const rs of A.brow.values()) for (const r of rs) for (const it of r.items) between[it.key] = true;
     now.current = {
       rects: { ...Object.fromEntries(tiles.map((tl) => [tl.key, tl.r])), ...(previewRect ? { preview: previewRect } : {}) },
-      base: others, sizes, brow: B.brow, brects: obrects, between,
+      base: others, sizes, ratios, brow: B.brow, brects: obrects, between,
     };
     moveTo.current = onMove;
   });
@@ -854,8 +955,13 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
   useEffect(() => { for (const [k, at] of JSON.parse(freshKey) as [string, Pos][]) moveTo.current(k, at); }, [freshKey]);
   const tied = useRef({ tops, starts, height, stickers });
   useEffect(() => { tied.current = { tops, starts, height, stickers }; });
-  /* the photo under the finger: its size on the page when it was picked up, and whether it came from a row between paragraphs */
-  const held = useRef({ w: 0, h: 0, from: false });
+  /* the photo under the finger: its size on the page when it was picked up, its shape, and whether it came from a row
+     between paragraphs */
+  const held = useRef({ w: 0, h: 0, r: 0.75, from: false });
+  const heldId = useRef<string | null>(null);
+  const shove = useSharedValue<Shove>({ id: '', dy: 0, n: 0 });
+  const edge = useRef(onEdge);
+  useEffect(() => { edge.current = onEdge; });
   /* the words reflow only when the photo's place really changes (its paragraph, line, or some points across), at most once a frame */
   const shown = useRef('');
   /* While a photo is held the words make room for it as it goes, in real time: each time its place changes (a line, a
@@ -869,28 +975,29 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
     shown.current = sig;
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
-  }, []);
+  }, [setLive]);
   const grab = useCallback((id: string) => {
-    const sz = now.current.sizes[id] ?? { w: 0, h: 0 };
-    held.current = { ...sz, from: !!now.current.between[id] };
+    const nw = now.current, sz = nw.sizes[id] ?? { w: 0, h: 0 };
+    held.current = { ...sz, r: nw.ratios[id] ?? (sz.w ? sz.h / sz.w : 0.75), from: !!nw.between[id] };
+    heldId.current = id;
     shown.current = ''; last.current = null;
     setPicked(null); setFront(id); setHolding(id);
+    Haptics.selectionAsync().catch(() => {});     // it has been taken hold of
   }, []);
-  const q = (v: number) => Math.round(v / 6) * 6;  // positions kept in steps of 6 points, so the words don't reflow for every pixel
-  /* A photo held at (x, y) with this size: over the words it goes beside them, at the paragraph and line its top is on;
-     over the gap between two paragraphs (a little into the words on either side counts) it goes in the row there, among
-     the photos already there, at the place its middle is over. */
-  const decide = useCallback((id: string, x: number, y: number, w: number, h: number) => {
+  /* A photo held at (x, y) with this size, the finger at (fgx, fgy): with the finger on the words it goes beside them,
+     its top level with the nearest line; with the finger in the gap between two paragraphs it goes in the row there,
+     among the photos already there, at the place the finger is over. */
+  const decide = useCallback((id: string, x: number, y: number, w: number, h: number, fgx: number, fgy: number) => {
     const nw = now.current;
     const cx = x + w / 2, cy = y + h / 2;
-    const b = boundaryAt(nw.base, cy);
+    const b = boundaryAt(nw.base, fgy);
     if (b >= 0) {
       const rs = nw.brow.get(b) ?? [];
       const list = rs.flatMap((r) => r.items).filter((it) => it.key !== id);
       let at = 0, ri = 0;
-      for (; ri < rs.length; ri++) { const rr = nw.brects[rs[ri].items[0]?.key]; if (rr && cy < rr.y + rr.h + 3) break; }
+      for (; ri < rs.length; ri++) { const rr = nw.brects[rs[ri].items[0]?.key]; if (rr && fgy < rr.y + rr.h + 3) break; }
       ri = Math.min(ri, Math.max(0, rs.length - 1));
-      if (rs[ri]) { at = ri * 3; for (const it of rs[ri].items) { const r2 = nw.brects[it.key]; if (it.key !== id && r2 && cx > r2.x + r2.w / 2) at++; } }
+      if (rs[ri]) { at = ri * 3; for (const it of rs[ri].items) { const r2 = nw.brects[it.key]; if (it.key !== id && r2 && fgx > r2.x + r2.w / 2) at++; } }
       at = Math.min(at, list.length);
       const prev = list[at - 1]?.o, next = list[at]?.o;
       const o = prev === undefined && next === undefined ? 0 : prev === undefined ? next! - 1 : next === undefined ? prev + 1 : (prev + next) / 2;
@@ -898,6 +1005,9 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
       return;
     }
     const sp = toSpot(id, x, y, w, h, nw.base, W, lh, size);
+    /* beside the words a photo sits against the left or the right edge, whichever its middle is nearer, so the words
+       beside it make one even column and nothing is left over on its other side */
+    sp.x = cx < W / 2 ? 0 : Math.max(0, W - w);
     /* not on top of another photo: it goes just below the one it would cover, or just above it when the finger is nearer
        its top (and there is room above in the paragraph) */
     const e = PAD - (lh - size) / 2, hh = sp.n * lh - 2 * e, st = nw.base.starts[sp.p] ?? 0;
@@ -910,28 +1020,31 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
       const above = Math.floor((hit.y - PAD - hh - e - st) / lh);
       k = cy < hit.y + hit.h / 2 && above >= 0 ? above : Math.ceil((hit.y + hit.h + PAD - e - st) / lh);
     }
-    /* the words go around the photo where the finger has it (in steps of a few points), so photo and words are one layer */
-    place(id, { x: q(sp.x), y, p: sp.p, k, w });
+    /* the words go around the photo where the finger has it, so photo and words are one layer */
+    place(id, { x: sp.x, y, p: sp.p, k, w });
   }, [W, lh, size, place]);
-  /* where the held photo is now (its top-left and width, from the gesture) */
-  const move = useCallback((id: string, x: number, y: number, w: number) => {
+  /* where the held photo is now: the finger on the page and the point of the photo it holds. Its size beside the words is
+     the one it had there (or two fingers gave it); one taken from a row between paragraphs has the usual size. */
+  const move = useCallback((id: string, gx: number, gy: number, fx: number, fy: number, want: number, sy: number) => {
     const hd = held.current;
-    const same = !hd.w || Math.abs(w - hd.w) < 0.5;
-    let ww = same ? hd.w || w : q(w);
-    if (same && hd.from && hd.w) ww = soloFor(hd.h / hd.w, W).w;     // from a row between paragraphs: beside the words at the usual size
-    const h = hd.w ? hd.h * ww / hd.w : ww * 0.75;
-    decide(id, x, y, ww, h);
+    const pinched = hd.w > 0 && Math.abs(want - hd.w) >= 0.5;
+    const ww = pinched ? Math.round(want) : hd.from || !hd.w ? soloFor(hd.r, W).w : hd.w;
+    const hh = ww * hd.r;
+    decide(id, gx - fx * ww, gy - fy * hh, ww, hh, gx, gy);
+    if (sy >= 0) edge.current?.(sy);
   }, [W, decide]);
   const drop = useCallback(() => {
     cancelAnimationFrame(frame.current);
     setHolding(null);
+    heldId.current = null;
+    edge.current?.(null);
     const lt = last.current;
     if (lt) { setLive((s) => ({ ...s, [lt.id]: lt.at })); moveTo.current(lt.id, lt.at); }
     last.current = null;
-  }, []);
+  }, [setLive]);
   /* A photo carried in from the bottom of the page: it is held over the page by the screen (so it follows the finger
      smoothly) and tells the page where it is (top-left, size); the page makes room, and says where it would land. */
-  const carry = useCallback((c: { x: number; y: number; w: number; h: number } | null, lift?: number[]) => {
+  const carry = useCallback((c: { x: number; y: number; w: number; h: number; gx: number; gy: number } | null, lift?: number[]) => {
     if (!c) {
       cancelAnimationFrame(frame.current);
       shown.current = ''; last.current = null;
@@ -941,17 +1054,27 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
       return;
     }
     if (!shown.current.startsWith('preview')) { setPv({ r: c.h / c.w }); setAway(lift?.[0] ?? null); setFront('preview'); }
-    decide('preview', c.x, c.y, c.w, c.h);
-  }, [decide]);
+    decide('preview', c.x, c.y, c.w, c.h, c.gx, c.gy);
+  }, [decide, setLive]);
   const landing = useCallback(() => {
     const lt = last.current, rect = now.current.rects.preview;
     return lt && lt.id === 'preview' && rect ? { at: lt.at, rect } : null;
   }, []);
+  const nudge = useCallback((dy: number) => {
+    const id = heldId.current;
+    if (id) shove.set({ id, dy, n: shove.get().n + 1 });
+  }, [shove]);
   useEffect(() => {
     if (!api) return undefined;
-    api.current = { carry, landing };
+    api.current = { carry, landing, nudge };
     return () => { api.current = null; };
-  }, [api, carry, landing]);
+  }, [api, carry, landing, nudge]);
+  /* where a photo carried in from the bottom would land, so the one under the finger can take its size (and, in a row
+     between paragraphs, its place) */
+  const tell = useRef(onPreview);
+  useEffect(() => { tell.current = onPreview; });
+  const pvx = previewRect?.x ?? 0, pvy = previewRect?.y ?? 0, pvw = previewRect?.w ?? 0, pvh = previewRect?.h ?? 0, pvRow = !!brects.preview;
+  useEffect(() => { tell.current?.(pvw ? { x: pvx, y: pvy, w: pvw, h: pvh, row: pvRow } : null); }, [pvx, pvy, pvw, pvh, pvRow]);
 
   /* a sticker let go (or just put on): tied to the paragraph its top is in; null throws it away */
   const stuck = useRef(onSticker);
@@ -1064,9 +1187,9 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
       <View ref={area} collapsable={false} style={{ height: Math.max(height, ...(stickers ?? []).map((st) => (st.p >= 0 ? (tops[Math.min(st.p, tops.length - 1)] ?? 0) : 0) + st.y + st.w)), marginTop: 12 }}>
         {marks.map((mk, pi) => (
           <React.Fragment key={`m${pi}`}>
-            {mk.head ? <Text style={[d.head, { top: tops[pi], color: t.ink, fontFamily: face.title }]}>{mk.head}</Text> : null}
+            {mk.head ? <Text style={[d.head, { top: tops[pi], left: headX[pi] ?? 0, color: t.ink, fontFamily: face.title }]}>{mk.head}</Text> : null}
             {mk.bar || mk.time ? (
-              <View style={[d.stamp, { top: tops[pi] + (mk.head ? HEAD : 0), height: mk.bar ? 22 : 16 }]}>
+              <View style={[d.stamp, { top: tops[pi] + (mk.head ? HEAD : 0), left: headX[pi] ?? 0, height: mk.bar ? 22 : 16 }]}>
                 {mk.time ? <Text style={[d.time, { color: t.mut }]}>{clock(mk.time)}</Text> : null}
                 {mk.bar ? <VoiceBar bar={mk.bar} /> : null}
               </View>
@@ -1075,7 +1198,7 @@ export function Page({ items, photos, placed, moved, api, voice, indent, onRenam
         ))}
         {lines.map(setLine)}
         {tiles.map((tl) => (
-          <Movable key={tl.key} id={tl.key} pk={tl.pics.map((pc) => pc.file ?? pc.uri ?? pc.asset).join('|')} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop} open={onOpen ? openTile : undefined} two={two}>
+          <Movable key={tl.key} id={tl.key} slot={!!brects[tl.key]} pk={tl.pics.map((pc) => pc.file ?? pc.uri ?? pc.asset).join('|')} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop} open={onOpen ? openTile : undefined} two={two} shove={shove}>
             {tl.pics.length > 1 ? <Fluid pics={tl.pics} />
               : <Image source={src(tl.pics[0])} contentFit="cover" style={[StyleSheet.absoluteFill, { borderRadius: 8 }]} />}
           </Movable>

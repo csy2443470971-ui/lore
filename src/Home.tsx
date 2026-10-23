@@ -5,7 +5,7 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
-import Re, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Re, { Easing, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { Fluid, Page, PageApi, pieces, shapeOf, soloFor, Stream } from './Doc';
 import { ShareSheet } from './Share';
 import { StickerBox } from './StickerBox';
@@ -16,6 +16,8 @@ import { Pic, Placed, Pos, Said, Sticker, Unit, unitsOf } from './session';
 import { keepRecording } from './store';
 import { SZ } from './theme';
 import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, useTimer } from './ui';
+
+type Rect = { x: number; y: number; w: number; h: number };
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
@@ -92,13 +94,29 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
      makes room, and on a drop says where the photo lands, and the photo glides there. */
   const pageApi = useRef<PageApi | null>(null);
   const gx = useSharedValue(0), gy = useSharedValue(0), gw = useSharedValue(64), gh = useSharedValue(64), gop = useSharedValue(0);
+  const gfx = useSharedValue(0.5), gfy = useSharedValue(0.5);           // where on the photo the finger holds it
+  /* over a gap between paragraphs it sits in the row there (gk 1) at its place on the screen (gsx, gsy), not under the finger */
+  const gk = useSharedValue(0), gsx = useSharedValue(0), gsy = useSharedValue(0);
   const [carried, setCarried] = useState<Pic[] | null>(null);          // the photos being carried
-  const held = useRef<{ u: Unit; moved: boolean; box: { x: number; y: number; w: number; h: number } | null; y0: number; sx: number; sy: number; fx: number; fy: number; sz: { w: number; h: number } } | null>(null);
+  /* the carried photo: where the finger started and is now (on the screen), where on the photo it holds it, its size beside
+     the words, the page's text area on the screen at the lift and how far the page was scrolled then */
+  const held = useRef<{ u: Unit; moved: boolean; box: { x: number; y: number; w: number; h: number } | null; y0: number; sx: number; sy: number; x: number; y: number; fx: number; fy: number; sz: { w: number; h: number }; slot: (Rect & { row: boolean }) | null } | null>(null);
   const scrollY = useRef(0);
   const sized = useRef({ content: 0, view: 0 });
   const auto = useRef<ReturnType<typeof setInterval> | null>(null);
   const pageW = W - 2 * SZ.px;
-  const ghostStyle = useAnimatedStyle(() => ({ left: gx.get() - gw.get() / 2, top: gy.get() - gh.get() / 2, width: gw.get(), height: gh.get(), opacity: gop.get() * 0.96 }));
+  /* the carried photo stays within the page's width, as the one it becomes will; over a gap it sits in its place in the row */
+  const ghostStyle = useAnimatedStyle(() => {
+    const ww = gw.get(), hh = gh.get(), k = gk.get();
+    const fl = Math.max(SZ.px, Math.min(W - SZ.px - ww, gx.get() - gfx.get() * ww)), ft = gy.get() - gfy.get() * hh;
+    return { left: fl + (gsx.get() - fl) * k, top: ft + (gsy.get() - ft) * k, width: ww, height: hh, opacity: gop.get() };
+  });
+  /* where the carried photo is on the screen now (its top-left) */
+  const ghostAt = () => {
+    const ww = gw.get(), hh = gh.get(), k = gk.get();
+    const fl = Math.max(SZ.px, Math.min(W - SZ.px - ww, gx.get() - gfx.get() * ww)), ft = gy.get() - gfy.get() * hh;
+    return { x: fl + (gsx.get() - fl) * k, y: ft + (gsy.get() - ft) * k };
+  };
 
   useEffect(() => { Animated.timing(fade, { toValue: hidden ? 0 : 1, duration: 360, useNativeDriver: true }).start(); }, [hidden, fade]);
   useEffect(() => () => { if (tick.current) clearInterval(tick.current); }, []);
@@ -222,42 +240,79 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
     setEditing(null);
   }
 
-  /* the size a photo (or a group) has on the page */
+  /* the size a photo (or a group) has beside the words */
   const sizeOf = (u: Unit) => (u.idx.length > 1 ? soloFor(1, pageW) : soloFor(shapeOf(photos[u.idx[0]]?.r), pageW));
   const GS = { damping: 22, stiffness: 260, mass: 0.6 };
-  function stopAuto() { if (auto.current) clearInterval(auto.current); auto.current = null; }
+  /* Near the top or bottom of the screen the page scrolls by itself while a photo is carried (from the thumbnails, or held
+     on the page), so it can be taken a long way; only once the finger has moved, so picking one up near an edge doesn't
+     set the page going. */
+  const edgeY = useRef<number | null>(null);
+  const afterScroll = useRef<(dy: number) => void>(() => {});
+  function stopAuto() { if (auto.current) clearInterval(auto.current); auto.current = null; edgeY.current = null; }
+  function runAuto(after: (dy: number) => void) {
+    afterScroll.current = after;
+    if (auto.current) return;
+    auto.current = setInterval(() => {
+      const fy = edgeY.current;
+      if (fy === null || !scroll.current) return;
+      const topEdge = top + 50 + 70, botEdge = Dimensions.get('window').height - 190;
+      const dy = fy < topEdge ? -Math.min(14, (topEdge - fy) / 5) : fy > botEdge ? Math.min(14, (fy - botEdge) / 5) : 0;
+      if (!dy) return;
+      const next = Math.max(0, Math.min(Math.max(0, sized.current.content - sized.current.view), scrollY.current + dy));
+      const d = next - scrollY.current;
+      if (!d) return;
+      scrollY.current = next;
+      scroll.current.scrollTo({ y: next, animated: false });
+      afterScroll.current(d);
+    }, 16);
+  }
+  /* The page moved under a carried photo without being asked (it grew shorter while the photo was carried, and the scroll
+     view kept within it): the photo stays under the finger, and its place in a row moves with the page. */
+  function onScrolled(ny: number) {
+    const d = ny - scrollY.current;
+    scrollY.current = ny;
+    if (!d) return;
+    if (held.current) { if (gk.get() > 0) gsy.set(gsy.get() - d); sendCarry(); }
+    else if (pageHold.current) pageApi.current?.nudge(d);
+  }
+  /* a photo held on the page: where the finger is on the screen, or null once it is let go */
+  const pageHold = useRef<{ y0: number; moved: boolean } | null>(null);
+  function onEdge(y: number | null) {
+    if (y === null) { pageHold.current = null; stopAuto(); return; }
+    if (!pageHold.current) pageHold.current = { y0: y, moved: false };
+    const ph = pageHold.current;
+    if (Math.abs(y - ph.y0) > 12) ph.moved = true;
+    edgeY.current = ph.moved ? y : null;
+    runAuto((dy) => pageApi.current?.nudge(dy));
+  }
   /* the finger on the screen, as the carried photo's top-left on the page (the page may have scrolled since the lift),
-     or null when it is off the page */
+     or null when it isn't over the page: over the thumbnails below it nothing on the page moves */
   function onPage(x: number, y: number) {
     const l = held.current, b = l?.box;
     if (!l || !b) return null;
     const px = x - b.x, py = y - b.y + (scrollY.current - l.y0);
-    if (px < -24 || px > b.w + 24 || py < -24 || py > b.h + 90) return null;
-    return { x: px - l.sz.w / 2, y: py - l.sz.h / 2 };
+    if (px < -24 || px > b.w + 24 || py < -24 || py > b.h + 36) return null;   // the white space just under the page counts: after the last paragraph
+    return { x: px - l.fx * l.sz.w, y: py - l.fy * l.sz.h, gx: px, gy: py };
   }
   function sendCarry() {
     const l = held.current;
     if (!l) return;
-    const at = onPage(l.fx, l.fy);
-    pageApi.current?.carry(at ? { x: at.x, y: at.y, w: l.sz.w, h: l.sz.h } : null, l.u.idx);
+    const at = onPage(l.x, l.y);
+    pageApi.current?.carry(at ? { ...at, w: l.sz.w, h: l.sz.h } : null, l.u.idx);
   }
-  /* near the top or bottom of the page the page scrolls by itself, so a photo can be carried a long way */
-  function startAuto() {
-    stopAuto();
-    auto.current = setInterval(() => {
-      const l = held.current;
-      if (!l || !scroll.current) return;
-      const topEdge = top + 50 + 70, botEdge = Dimensions.get('window').height - 190;
-      let dy = 0;
-      if (l.fy < topEdge) dy = -Math.min(16, (topEdge - l.fy) / 5);
-      else if (l.fy > botEdge) dy = Math.min(16, (l.fy - botEdge) / 5);
-      if (!dy) return;
-      const next = Math.max(0, Math.min(Math.max(0, sized.current.content - sized.current.view), scrollY.current + dy));
-      if (next === scrollY.current) return;
-      scrollY.current = next;
-      scroll.current.scrollTo({ y: next, animated: false });
-      sendCarry();
-    }, 16);
+  /* Where the page would set it: the carried photo takes that size (its own beside the words, the row's between two
+     paragraphs), around the point the finger holds; in a row it goes into its place there and sits in it. */
+  function onPreview(r: (Rect & { row: boolean }) | null) {
+    const l = held.current;
+    if (!l) return;
+    l.slot = r;
+    const s = r ?? l.sz;
+    gw.set(withSpring(s.w, GS)); gh.set(withSpring(s.h, GS));
+    if (r?.row && l.box) {
+      if (gk.get() < 0.01) { const at = ghostAt(); gsx.set(at.x); gsy.set(at.y); }
+      gsx.set(withSpring(l.box.x + r.x, GS)); gsy.set(withSpring(l.box.y - (scrollY.current - l.y0) + r.y, GS));
+      gk.set(withTiming(1, { duration: 160 }));
+    } else gk.set(withTiming(0, { duration: 160 }));
   }
   function endCarry() {
     stopAuto();
@@ -265,45 +320,51 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
     pageApi.current?.carry(null);
     setDragging(false);
   }
-  const fadeGhost = () => { gop.set(withTiming(0, { duration: 140 })); setTimeout(() => setCarried(null), 160); };
-  /* the long press took hold of a thumbnail: with a page to drop it on, it lifts (grows from the thumbnail to the size
-     it has on the page, under the finger); without one, the menu opens (delete, take a group apart) */
-  function liftStart(u: Unit, x: number, y: number, tile: number) {
+  const fadeGhost = (after = 0) => setTimeout(() => { gop.set(withTiming(0, { duration: 120 })); setTimeout(() => setCarried(null), 140); }, after);
+  /* The long press took hold of a thumbnail: with a page to drop it on, it grows from the thumbnail to the size it has
+     on the page, around the point the finger holds; without one, the menu opens (delete, take a group apart). */
+  function liftStart(u: Unit, x: number, y: number, tile: number, fx: number, fy: number) {
     if (recording || select) return;
     if (!laid) { photoMenu(u); return; }
     const sz = sizeOf(u);
-    held.current = { u, moved: false, box: null, y0: scrollY.current, sx: x, sy: y, fx: x, fy: y, sz: { w: sz.w, h: sz.h } };
+    held.current = { u, moved: false, box: null, y0: scrollY.current, sx: x, sy: y, x, y, fx, fy, sz: { w: sz.w, h: sz.h }, slot: null };
+    gfx.set(fx); gfy.set(fy); gk.set(0);
     setCarried(u.idx.map((i) => photos[i]));
     gw.set(tile); gh.set(tile); gop.set(1);
     gw.set(withSpring(sz.w, GS)); gh.set(withSpring(sz.h, GS));
     setDragging(true);
     area.current?.measureInWindow((ax, ay, aw, ah) => { if (held.current) { held.current.box = { x: ax, y: ay, w: aw, h: ah }; sendCarry(); } });
-    startAuto();
+    runAuto((dy) => { if (gk.get() > 0) gsy.set(gsy.get() - dy); sendCarry(); });   // the row moves up the screen with the page
     Haptics.selectionAsync().catch(() => {});
   }
   function liftMove(x: number, y: number) {
     const l = held.current;
     if (!l) return;
-    l.fx = x; l.fy = y;
+    l.x = x; l.y = y;
     if (Math.abs(x - l.sx) + Math.abs(y - l.sy) > 8) l.moved = true;
+    edgeY.current = l.moved ? y : null;
     sendCarry();
   }
-  /* let go: over the page, the photo glides to the place the page made for it and stays there; off the page it fades;
-     without having moved, the menu opens */
+  /* Let go over the page: the photo glides into the place the page made for it, and only then is it put there, so the
+     page's own photo takes over exactly where it is (never two at once). Off the page it fades; without having moved,
+     the menu opens. */
   function liftEnd(x: number, y: number) {
     const l = held.current;
     if (!l) return;
-    l.fx = x; l.fy = y;
+    l.x = x; l.y = y;
     const at = onPage(x, y) ? pageApi.current?.landing() : null;
     const b = l.box;
     if (at && b) {
       const lx = b.x + at.rect.x, ly = b.y + at.rect.y - (scrollY.current - l.y0);
-      gx.set(withSpring(lx + at.rect.w / 2, GS)); gy.set(withSpring(ly + at.rect.h / 2, GS));
-      gw.set(withSpring(at.rect.w, GS)); gh.set(withSpring(at.rect.h, GS));
-      onPlace(l.u.idx, at.at);
-      endCarry();
-      setTimeout(fadeGhost, 240);
+      const glide = { duration: 200, easing: Easing.out(Easing.cubic) };
+      if (gk.get() < 0.99) { const now = ghostAt(); gsx.set(now.x); gsy.set(now.y); gk.set(1); }
+      gsx.set(withTiming(lx, glide)); gsy.set(withTiming(ly, glide));
+      gw.set(withTiming(at.rect.w, glide)); gh.set(withTiming(at.rect.h, glide));
+      stopAuto();
+      held.current = null;
+      const idx = l.u.idx;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setTimeout(() => { onPlace(idx, at.at); pageApi.current?.carry(null); setDragging(false); fadeGhost(60); }, 210);
       return;
     }
     const u = l.u, moved = l.moved;
@@ -322,7 +383,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   useEffect(() => { lifter.current = { start: liftStart, move: liftMove, end: liftEnd, stop: liftStop }; });
   const lift = useMemo<Lift>(() => ({
     gx, gy,
-    start: (u, x, y, tile) => lifter.current.start(u, x, y, tile), move: (x, y) => lifter.current.move(x, y),
+    start: (u, x, y, tile, fx, fy) => lifter.current.start(u, x, y, tile, fx, fy), move: (x, y) => lifter.current.move(x, y),
     end: (x, y) => lifter.current.end(x, y), stop: () => lifter.current.stop(),
   }), [gx, gy]);
   useEffect(() => stopAuto, []);
@@ -392,12 +453,12 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
       ) : (
         <Animated.View style={[StyleSheet.absoluteFill, { top: top + 50, bottom: typing !== null ? kb : 0, opacity: turn }]}>
         <GHScrollView ref={scroll} scrollEnabled={!dragging} style={{ flex: 1 }} showsVerticalScrollIndicator={false} scrollEventThrottle={16}
-          onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
+          onScroll={(e) => onScrolled(e.nativeEvent.contentOffset.y)}
           onLayout={(e) => { sized.current.view = e.nativeEvent.layout.height; }}
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
           onContentSizeChange={(_w, ch) => { sized.current.content = ch; if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page key={day} items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
-            api={pageApi} voice={voice} indent={indent} onRename={recording ? undefined : onRename} ownTitle={ownTitle}
+            api={pageApi} onEdge={onEdge} onPreview={onPreview} voice={voice} indent={indent} onRename={recording ? undefined : onRename} ownTitle={ownTitle}
             onDrag={setDragging} onMove={onMove} onEdit={edit}
             onMerge={recording ? undefined : onMerge} onShare={(item) => setChoosing(new Set([`t${item}`]))} onSelect={setReading}
             onOpen={(idx) => setViewing({ idx, at: 0 })}

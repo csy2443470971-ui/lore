@@ -63,7 +63,7 @@ export const label = (u: Unit) => (u.idx.length > 1 ? `${u.idx[0] + 1}–${u.idx
    screen, not the page) onto the words, into a gap between paragraphs, or back; let go without moving and the menu opens. */
 export type Lift = {
   gx: SharedValue<number>; gy: SharedValue<number>;                     // the finger, on the screen: the carried photo is drawn there
-  start: (u: Unit, x: number, y: number, tile: number) => void;        // the long press took hold
+  start: (u: Unit, x: number, y: number, tile: number, fx: number, fy: number) => void;   // the long press took hold (fx, fy: where on the thumbnail)
   move: (x: number, y: number) => void;
   end: (x: number, y: number) => void;                                  // the finger came up
   stop: () => void;                                                     // the touch was taken away
@@ -100,7 +100,7 @@ function TrayTile({ u, photos, tile, used, select, picked, locked, onToggle, onO
     if (c.select) { if (!c.locked && c.u.idx.length === 1) c.onToggle(c.u.idx[0]); return; }
     c.onOpen(c.u.idx);
   }, []);
-  const onLift = useCallback((x: number, y: number) => { const c = it.current; c.lift.start(c.u, x, y, c.tile); }, []);
+  const onLift = useCallback((x: number, y: number, fx: number, fy: number) => { const c = it.current; c.lift.start(c.u, x, y, c.tile, fx, fy); }, []);
   const onMove = useCallback((x: number, y: number) => it.current.lift.move(x, y), []);
   const onEnd = useCallback((x: number, y: number) => it.current.lift.end(x, y), []);
   const onStop = useCallback(() => it.current.lift.stop(), []);
@@ -109,9 +109,9 @@ function TrayTile({ u, photos, tile, used, select, picked, locked, onToggle, onO
   /* the handlers only run during a gesture, never while rendering */
   /* eslint-disable react-hooks/refs */
   const gesture = useMemo(() => {
-    const tap = Gesture.Tap().maxDuration(250).maxDistance(12).onEnd((_e, ok) => { if (ok) scheduleOnRN(onTap); });
+    const tap = Gesture.Tap().maxDuration(270).maxDistance(12).onEnd((_e, ok) => { if (ok) scheduleOnRN(onTap); });
     const pan = Gesture.Pan().enabled(!select).activateAfterLongPress(280)
-      .onStart((e) => { gx.set(e.absoluteX); gy.set(e.absoluteY); sent.set({ x: e.absoluteX, y: e.absoluteY }); scheduleOnRN(onLift, e.absoluteX, e.absoluteY); })
+      .onStart((e) => { gx.set(e.absoluteX); gy.set(e.absoluteY); sent.set({ x: e.absoluteX, y: e.absoluteY }); scheduleOnRN(onLift, e.absoluteX, e.absoluteY, Math.max(0, Math.min(1, e.x / tile)), Math.max(0, Math.min(1, e.y / tile))); })
       .onUpdate((e) => {
         gx.set(e.absoluteX); gy.set(e.absoluteY);                       // the photo follows the finger on the screen's own thread
         const l = sent.get();
@@ -120,7 +120,7 @@ function TrayTile({ u, photos, tile, used, select, picked, locked, onToggle, onO
       .onEnd((e) => { scheduleOnRN(onEnd, e.absoluteX, e.absoluteY); })
       .onFinalize((_e, ok) => { if (!ok) scheduleOnRN(onStop); });
     return Gesture.Race(tap, pan);
-  }, [select, gx, gy, sent, onTap, onLift, onMove, onEnd, onStop]);
+  }, [select, tile, gx, gy, sent, onTap, onLift, onMove, onEnd, onStop]);
   /* eslint-enable react-hooks/refs */
   const ring = <View style={[StyleSheet.absoluteFill, { borderRadius: r, borderWidth: 2.5, borderColor: t.ink }]} />;
   const group = u.idx.length > 1;
