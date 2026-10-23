@@ -148,7 +148,12 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
       for (const { sp, y0, y1 } of own) {
         if (y1 <= ly || y0 >= ly + lh) continue;
         const a = sp.x - PAD, b = sp.x + sp.w + PAD;
-        segs = segs.flatMap(([s, f]) => (b <= s || a >= f ? [[s, f]] : [[s, Math.max(s, a)], [Math.min(f, b), f]] as [number, number][]));
+        /* the words go down the wider side only, so a line never jumps across a photo in the middle */
+        segs = segs.flatMap(([s, f]): [number, number][] => {
+          if (b <= s || a >= f) return [[s, f]];
+          const left: [number, number] = [s, Math.max(s, a)], right: [number, number] = [Math.min(f, b), f];
+          return [left[1] - left[0] >= right[1] - right[0] ? left : right];
+        });
       }
       let near = false;                            // a sticker cuts this line: only a roomy gap beside it takes words
       for (const fl of floats) {
@@ -492,18 +497,6 @@ function Lifted({ text, top, W, ink, up, down, onAim, onUp, onDown, onShare, onS
   );
 }
 
-/* where a held photo will land: a soft space that moves with the finger by itself, without re-rendering the page */
-type Bus<T> = { on: (f: (v: T) => void) => () => void; emit: (v: T) => void };
-function bus<T>(): Bus<T> {
-  let fn: ((v: T) => void) | null = null;
-  return { on: (f) => { fn = f; return () => { fn = null; }; }, emit: (v) => fn?.(v) };
-}
-function Landing({ hook, color }: { hook: Bus<Rect | null>; color: string }) {
-  const [r, setR] = useState<Rect | null>(null);
-  useEffect(() => hook.on(setR), [hook]);
-  return r ? <View pointerEvents="none" style={[d.landing, { left: r.x, top: r.y, width: r.w, height: r.h, borderColor: color }]} /> : null;
-}
-
 /* how a set of photos sits together: one, a pair, one large with two small, or a 2×2 grid; w is the page width */
 const G = 4;
 function cluster(n: number, w: number): Rect[] {
@@ -678,24 +671,20 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
      or a side) the page reflows on the next frame, and a thin outline marks the place. Only the lines that move are
      redrawn, and photos and stickers whose place didn't change aren't touched, so this keeps up with the finger. */
   const frame = useRef(0);
-  const land = useMemo(() => bus<Rect | null>(), []);
   const place = useCallback((id: string, at: Pos, h: number) => {
     last.current = { id, at };
     const sig = `${id}|${at.p}|${at.k}|${at.x}|${at.w}`;
     if (sig === shown.current) return;
     shown.current = sig;
-    const { starts: ss } = tied.current, n = linesFor(h);
-    land.emit({ x: at.x, y: (ss[at.p ?? 0] ?? 0) + (at.k ?? 0) * lh + e, w: at.w ?? 0, h: n * lh - 2 * e });
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lh, e, land]);
+  }, [lh, e]);
   const grab = useCallback((id: string) => {
     held.current = now.current.sizes[id] ?? { w: 0, h: 0 };
     shown.current = ''; last.current = null;
     setPicked(null); setFront(id);
-    land.emit(now.current.rects[id] ?? null);
-  }, [land]);
+  }, []);
   const q = (v: number) => Math.round(v / 6) * 6;  // positions kept in steps of 6 points, so the words don't reflow for every pixel
   /* where the held photo is now (its top-left and width, from the gesture): the place the words make for it */
   const move = useCallback((id: string, x: number, y: number, w: number) => {
@@ -703,18 +692,15 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
     const same = !hd.w || Math.abs(w - hd.w) < 0.5;
     const ww = same ? hd.w || w : q(w), h = hd.w ? hd.h * ww / hd.w : ww * 0.75;
     const sp = toSpot(id, x, y, ww, h, now.current.base, W, lh, size);
-    /* it lands against whichever edge its middle is nearer, or across the page when it is that wide: the words keep to
-       one column beside it, and only move when it changes line or side, not with every point of the finger */
-    const side = ww >= W * 0.7 ? 0 : x + ww / 2 < W / 2 ? 0 : W - ww;
-    place(id, { x: Math.round(side), y, p: sp.p, k: sp.k, w: ww }, h);
+    /* the words go around the photo where the finger has it (in steps of a few points), so photo and words are one layer */
+    place(id, { x: q(sp.x), y, p: sp.p, k: sp.k, w: ww }, h);
   }, [W, lh, size, place]);
   const drop = useCallback(() => {
     cancelAnimationFrame(frame.current);
-    land.emit(null);
     const lt = last.current;
     if (lt) { setLive((s) => ({ ...s, [lt.id]: lt.at })); moveTo.current(lt.id, lt.at); }
     last.current = null;
-  }, [land]);
+  }, []);
 
   /* a sticker let go (or just put on): tied to the paragraph its top is in; null throws it away */
   const stuck = useRef(onSticker);
@@ -831,7 +817,6 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
           </React.Fragment>
         ))}
         {lines.map(setLine)}
-        <Landing hook={land} color={t.mut} />
         {tiles.map((tl) => (
           <Movable key={tl.key} id={tl.key} pk={tl.pics.map((pc) => pc.file ?? pc.uri ?? pc.asset).join('|')} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop} open={onOpen ? openTile : undefined}>
             {tl.pics.length > 1 ? <Fluid pics={tl.pics} />
@@ -939,7 +924,6 @@ function VoiceBar({ bar }: { bar: Bar }) {
 const d = StyleSheet.create({
   head: { position: 'absolute', left: 0, fontSize: 14.5, lineHeight: 20, fontWeight: '600' },
   marker: { position: 'absolute', borderRadius: 3 },
-  landing: { position: 'absolute', borderRadius: 10, borderWidth: 1.5, borderStyle: 'dashed', zIndex: 1 },
   seg: { position: 'absolute', zIndex: 6, flexDirection: 'row', borderRadius: 17, padding: 3, gap: 2, width: 176, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
   segBtn: { flex: 1, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   dim: { position: 'absolute', left: -40, right: -40, top: -400, bottom: -800, opacity: 0.72, zIndex: 7 },
