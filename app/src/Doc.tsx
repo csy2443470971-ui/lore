@@ -530,7 +530,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; preview?: { pics: Pic[]; x: number; y: number } | null;
   voice?: boolean;                                                // voice bars at the top left of what was said (a setting)
   indent?: boolean;                                               // first-line indent (a setting)
-  onTitle?: () => void;                                           // the date at the top: choose which day the page belongs to
+  onTitle?: () => void;                                           // a tap on the page's title: rename it
   title: string; meta: string;
   area?: React.RefObject<View | null>;                           // the text area, for finding where a photo from the tray was dropped
   onDrag: (on: boolean) => void; onMove: (key: string, at: Pos) => void; onEdit: (item: number, part: number) => void;
@@ -816,7 +816,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
 
   return (
     <View style={d.page}>
-      {title ? <Text onPress={onTitle} suppressHighlighting style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}{onTitle ? <Text style={{ fontSize: 13, color: t.mut }}>  ▾</Text> : null}</Text> : null}
+      {title ? <Text onPress={onTitle} suppressHighlighting style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text> : null}
       {meta ? <Text style={[d.meta, { color: t.mut }]}>{meta}</Text> : null}
       <View ref={area} collapsable={false} style={{ height: Math.max(height, ...(stickers ?? []).map((st) => (st.p >= 0 ? (tops[Math.min(st.p, tops.length - 1)] ?? 0) : 0) + st.y + st.w)), marginTop: 12 }}>
         {marks.map((mk, pi) => (

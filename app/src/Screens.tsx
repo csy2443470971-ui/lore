@@ -259,10 +259,11 @@ function Reminders() {
   return <Row k={S.sRemind} sub={S.sRemindSub} extra={<Seg value={r} onChange={setR} options={[['night', S.rNight], ['week', S.rWeek], ['off', S.rOff]]} />} />;
 }
 
-export function Settings({ open, onClose, mode, setMode, lang, setLang, grammar, setGrammar, voice, setVoice, indent, setIndent }: {
+export function Settings({ open, onClose, mode, setMode, lang, setLang, grammar, setGrammar, voice, setVoice, indent, setIndent, where, setWhere }: {
   open: boolean; onClose: () => void; mode: Mode; setMode: (m: Mode) => void; lang: Lang; setLang: (l: Lang) => void;
   grammar: boolean; setGrammar: (g: boolean) => void; voice: boolean; setVoice: (v: boolean) => void;
   indent: boolean; setIndent: (v: boolean) => void;
+  where: boolean; setWhere: (v: boolean) => void;   // record where each day was written
 }) {
   const t = useT();
   const S = useS();
@@ -277,6 +278,7 @@ export function Settings({ open, onClose, mode, setMode, lang, setLang, grammar,
         <WritingStyle grammar={grammar} setGrammar={setGrammar} />
         <Row k={S.sVoice} sub={S.sVoiceSub}><Toggle key={String(voice)} on={voice} onChange={setVoice} /></Row>
         <Row k={S.sIndent} sub={S.sIndentSub}><Toggle key={String(indent)} on={indent} onChange={setIndent} /></Row>
+        <Row k={S.sPlace} sub={S.sPlaceSub}><Toggle key={String(where)} on={where} onChange={setWhere} /></Row>
         <Reminders />
         <Row k={S.sAuto} sub={S.sAutoSub}
           extra={<View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>{S.sources.map((l, i) => <Chip key={l} label={l} on={i < 3} />)}</View>} />
