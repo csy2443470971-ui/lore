@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Dimensions, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Re, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -519,11 +519,11 @@ export const solo = (w: number) => cluster(1, w)[0];
    English lines up at both edges like Chinese. Drag any photo and the paragraphs reflow around it; where it ends up
    is kept. A photo carried in from the tray (preview) moves the words before it is let go. Tap a word to edit it. */
 type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
-export function Page({ items, photos, placed, moved, preview, voice, indent, onTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
+export function Page({ items, photos, placed, moved, preview, voice, indent, onRename, ownTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
   items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; preview?: { pics: Pic[]; x: number; y: number } | null;
   voice?: boolean;                                                // voice bars at the top left of what was said (a setting)
   indent?: boolean;                                               // first-line indent (a setting)
-  onTitle?: () => void;                                           // a tap on the page's title: rename it
+  onRename?: (text: string) => void; ownTitle?: string;          // the title is renamed right where it is (empty: the date again)
   title: string; meta: string;
   area?: React.RefObject<View | null>;                           // the text area, for finding where a photo from the tray was dropped
   onDrag: (on: boolean) => void; onMove: (key: string, at: Pos) => void; onEdit: (item: number, part: number) => void;
@@ -638,6 +638,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
   })];
   const ghost = preview ? toSpot('preview', preview.x, preview.y, one.w, one.h, base, W, lh, size) : null;
   const { lines, rects, tops, starts, height } = run(ghost ? [...spots, ghost] : spots);
+  const [naming, setNaming] = useState<string | null>(null);   // the title being renamed, in place
   const [lifted, setLifted] = useState<number | null>(null);   // the paragraph held up by a long press
   const [aimAt, setAimAt] = useState<number | null>(null);     // the paragraph it would join if let go now
   const tiles: { key: string; pics: Pic[]; r: Rect }[] = [];
@@ -802,7 +803,13 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onT
 
   return (
     <View style={d.page}>
-      {title ? <Text onPress={onTitle} suppressHighlighting style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text> : null}
+      {naming !== null ? (
+        <TextInput value={naming} onChangeText={setNaming} autoFocus selectTextOnFocus returnKeyType="done" selectionColor={t.red} placeholder={title}
+          placeholderTextColor={t.mut} onSubmitEditing={() => { onRename?.(naming); setNaming(null); }} onBlur={() => { onRename?.(naming); setNaming(null); }}
+          style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title, padding: 0 }]} />
+      ) : title ? (
+        <Text onPress={onRename ? () => setNaming(ownTitle || title) : undefined} suppressHighlighting style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text>
+      ) : null}
       {meta ? <Text style={[d.meta, { color: t.mut }]}>{meta}</Text> : null}
       <View ref={area} collapsable={false} style={{ height: Math.max(height, ...(stickers ?? []).map((st) => (st.p >= 0 ? (tops[Math.min(st.p, tops.length - 1)] ?? 0) : 0) + st.y + st.w)), marginTop: 12 }}>
         {marks.map((mk, pi) => (
