@@ -46,7 +46,7 @@ const zh = {
   /* --- new direction --- */
   hi: (night: boolean): string => night ? '晚上好' : '下午好', ask0: '今天过得怎么样？', bubbleMore: '下午说过一段，接着说？', bubbleNone: '说一句也好',
   photoHow: '排版只整理文字。排好以后，长按下面的照片，拖到页面上想放的地方。',
-  dragHow: '长按一张照片，拖到页面里：可以放在文字旁边，也可以放在两段之间，一行最多三张。',
+  dragHow: '长按一张照片拖到页面里：放在左边或右边，文字会绕开它（可以跨段）；放在两段之间的正中间，它就单独成一行，一行最多三张。',
   dragHint: '拖动照片，文字会自己让开', discarded: '这段不要了', releaseCancel: '松开手指，这段就不要了',
   micDenied: '要录音，需要打开麦克风权限', cameraDenied: '要拍照，需要打开相机权限', openSettings: '去设置',
   delPhoto: '删除这张', delGroup: '删除这组', ungroup: '取消分组',
@@ -168,7 +168,7 @@ const en: typeof zh = {
   /* --- new direction --- */
   hi: (night) => night ? 'Good evening' : 'Good afternoon', ask0: 'How was your day?', bubbleMore: 'You talked this afternoon. Carry on?', bubbleNone: 'Even one sentence is enough',
   photoHow: 'Lay out tidies the words only. Afterwards, hold a photo below and drag it onto the page wherever you want it.',
-  dragHow: 'Hold a photo and drag it onto the page: beside the words, or between two paragraphs, up to three in a row.',
+  dragHow: 'Hold a photo and drag it onto the page: to the left or right, the words go around it (across paragraphs too); in the middle between two paragraphs, it sits in a row of its own, up to three in a row.',
   dragHint: 'Drag a photo and the words move out of its way', discarded: 'Discarded', releaseCancel: 'Let go to discard',
   micDenied: 'Turn on the microphone to record', cameraDenied: 'Turn on the camera to take photos', openSettings: 'Open settings',
   delPhoto: 'Delete photo', delGroup: 'Delete group', ungroup: 'Ungroup',
