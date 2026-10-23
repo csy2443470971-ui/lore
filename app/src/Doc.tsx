@@ -1390,7 +1390,7 @@ const d = StyleSheet.create({
   barT: { fontSize: 11, letterSpacing: 0.2, fontVariant: ['tabular-nums'] },
   tx: { fontSize: 16, lineHeight: 28 },
   page: { paddingTop: 6 },
-  title: { fontSize: 20, lineHeight: 28 },
-  titleEn: { fontSize: 23, lineHeight: 28, letterSpacing: -0.2 },
+  title: { fontSize: 17, lineHeight: 24 },
+  titleEn: { fontSize: 19, lineHeight: 24, letterSpacing: -0.1 },
   meta: { fontSize: 11.5, marginTop: 3 },
 });

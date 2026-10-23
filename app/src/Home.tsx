@@ -652,13 +652,13 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
 
 const h = StyleSheet.create({
   tb: { position: 'absolute', left: 0, right: 0, paddingLeft: SZ.px, paddingRight: SZ.px - 4, height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontSize: 22 },
-  titleSm: { fontSize: 18 },
+  title: { fontSize: 18 },
+  titleSm: { fontSize: 16 },
   titleBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   caret: { fontSize: 13, marginTop: 3 },
   empty: { position: 'absolute', left: SZ.px, right: SZ.px, alignItems: 'center', gap: 10 },
-  hi: { fontSize: 14, textAlign: 'center' },
-  ask: { fontSize: 28, lineHeight: 38, textAlign: 'center' },
+  hi: { fontSize: 13, textAlign: 'center' },
+  ask: { fontSize: 21, lineHeight: 30, textAlign: 'center' },
   tx: { fontSize: 16, lineHeight: 28 },
   foot: { marginTop: 28, paddingTop: 22, borderTopWidth: StyleSheet.hairlineWidth },   // the thumbnails sit apart from the diary, under a hairline
   trayHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
