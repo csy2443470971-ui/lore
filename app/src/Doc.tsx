@@ -344,15 +344,16 @@ function rowOf(rs: number[], W: number) {
   return { h, ws, x0: Math.round((W - total) / 2) };
 }
 /* the gap between two paragraphs the finger is in (0 before the first, the count after the last), or -1 when it is over
-   the words: only the white space right at the boundary, between the last line above and the paragraph below (its
-   heading and time just begin there), so a photo goes into a row only when the finger is right at the boundary.
+   the words: the boundary is the last line above, the white space under it, and the top of the paragraph below (where
+   its heading and time begin), so a photo goes into a row only when the finger is right at the boundary, and a finger
+   on a paragraph's last line never puts the photo beside that last sentence.
    It goes by the finger, not the photo, so a photo goes between two paragraphs where the finger is between them and
    beside the words where the finger is on them, even beside a paragraph's last lines. */
-function boundaryAt(base: { tops: number[]; bottoms: number[]; starts: number[] }, cy: number): number {
+function boundaryAt(base: { tops: number[]; bottoms: number[]; starts: number[] }, cy: number, lh: number): number {
   const P = base.bottoms.length;
   let best = -1, bd = Infinity;
   for (let b = 0; b <= P; b++) {
-    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - 2;
+    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - lh + 2;   // the last line above belongs to the boundary
     const hi = b === P ? Infinity : base.tops[b] + 10;
     if (cy < lo || cy > hi) continue;
     const mid = ((b === 0 ? (base.tops[0] ?? 0) - 20 : base.bottoms[b - 1]) + (b === P ? (base.bottoms[P - 1] ?? 0) + 20 : base.tops[b])) / 2;
@@ -1034,7 +1035,17 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   const decide = useCallback((id: string, x: number, y: number, w: number, h: number, fgx: number, fgy: number) => {
     const nw = now.current;
     const cy = y + h / 2;
-    const b = boundaryAt(nw.base, fgy);
+    let b = boundaryAt(nw.base, fgy, lh);
+    const sp = toSpot(id, x, y, w, h, nw.base, W, lh, size);
+    /* The two kinds of place are kept apart: beside the words a photo always has at least two lines of its own
+       paragraph next to it. One that would sit beside a paragraph's last line only goes between that paragraph and the
+       next instead (a one-line paragraph: before it with the finger over its upper half, after it below), so a photo
+       meant for the gap never takes the last sentence above with it. */
+    if (b < 0) {
+      const rows = nw.base.rows[sp.p] ?? 1;
+      if (rows < 2) b = sp.p + (fgy < (nw.base.starts[sp.p] ?? 0) + lh / 2 ? 0 : 1);
+      else if (sp.k > rows - 2) b = sp.p + 1;
+    }
     if (b >= 0) {
       const rs = nw.brow.get(b) ?? [];
       const list = rs.flatMap((r) => r.items).filter((it) => it.key !== id);
@@ -1048,7 +1059,6 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       place(id, { x: 0, y: 0, b, o });
       return;
     }
-    const sp = toSpot(id, x, y, w, h, nw.base, W, lh, size);
     /* beside the words the photo is where the finger has it, and the words go around it there as it moves (in steps of
        a few points); near an edge it goes against the edge */
     if (sp.x > 0 && sp.x < W - w) sp.x = Math.round(sp.x / 6) * 6;
