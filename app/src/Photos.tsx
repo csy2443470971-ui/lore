@@ -58,8 +58,9 @@ export const label = (u: Unit) => (u.idx.length > 1 ? `${u.idx[0] + 1}–${u.idx
 /* Today's photos on the writing page. Few photos stay big (three across up to three, four across up to eight,
    then five); only past three rows do they sit in a white window that scrolls and shows three and a half rows.
    Photos already on the page are left out. Long-press one to drag it onto the page, or to delete it. */
-export function Tray({ photos, groups, skip, width, select, sel, onToggle, onLong, onRelease, cur }: {
+export function Tray({ photos, groups, skip, width, select, sel, onToggle, onOpen, onLong, onRelease, cur }: {
   photos: Pic[]; groups: number[][]; skip?: Set<number>; width: number; select: boolean; sel: number[]; onToggle: (i: number) => void;
+  onOpen: (idx: number[]) => void;                    // a tap opens the photo (or the whole group) full screen, to look at and edit
   onLong: (u: Unit, x: number, y: number) => void; onRelease: () => void; cur: number;
 }) {
   const t = useT();
@@ -88,7 +89,7 @@ export function Tray({ photos, groups, skip, width, select, sel, onToggle, onLon
           const dim = cur >= 0 && n !== cur ? 0.45 : 1;
           if (u.idx.length > 1) {
             return (
-              <Pressable key={'g' + u.idx[0]} disabled={select} delayLongPress={350} onLongPress={(e) => onLong(u, e.nativeEvent.pageX, e.nativeEvent.pageY)} onPressOut={onRelease} style={{ opacity: select ? 0.5 : dim }}>
+              <Pressable key={'g' + u.idx[0]} disabled={select} onPress={() => onOpen(u.idx)} delayLongPress={350} onLongPress={(e) => onLong(u, e.nativeEvent.pageX, e.nativeEvent.pageY)} onPressOut={onRelease} style={{ opacity: select ? 0.5 : dim }}>
                 <Stack pics={u.idx.map((i) => photos[i])} size={tile} r={r} />
                 <Badge text={label(u)} mid={tile > 90} />
                 {n === cur ? ring : null}
@@ -97,7 +98,7 @@ export function Tray({ photos, groups, skip, width, select, sel, onToggle, onLon
           }
           const i = u.idx[0], on = sel.includes(i);
           return (
-            <Pressable key={i} disabled={select && grouped.has(i)} onPress={() => select && onToggle(i)} delayLongPress={350} onLongPress={(e) => !select && onLong(u, e.nativeEvent.pageX, e.nativeEvent.pageY)} onPressOut={onRelease} style={{ width: tile, height: tile, opacity: dim }}>
+            <Pressable key={i} disabled={select && grouped.has(i)} onPress={() => (select ? onToggle(i) : onOpen([i]))} delayLongPress={350} onLongPress={(e) => !select && onLong(u, e.nativeEvent.pageX, e.nativeEvent.pageY)} onPressOut={onRelease} style={{ width: tile, height: tile, opacity: dim }}>
               <Image source={src(photos[i])} contentFit="cover" style={{ width: tile, height: tile, borderRadius: r }} />
               <Badge text={String(i + 1)} mid={tile > 90} />
               {on || n === cur ? ring : null}
