@@ -345,15 +345,15 @@ function rowOf(items: { r: number; w?: number }[], W: number) {
   const total = ws.reduce((a, b) => a + b, 0) + GT * (items.length - 1);
   return { h, ws, x0: Math.round((W - total) / 2) };
 }
-/* the gap between two paragraphs the finger is in (0 before the first, the count after the last), or -1 when it is
-   elsewhere: from the middle of the last line above to the first line below (the heading and time between included).
-   Whether a photo there goes into the row depends on where across the page it is held (see decide). */
+/* the gap between two paragraphs the finger is in (0 before the first, the count after the last), or -1 when it is on
+   the words: the white space between the last line above and the first line below (the heading and time between
+   included) */
 function boundaryAt(base: { tops: number[]; bottoms: number[]; starts: number[]; rows: number[] }, cy: number, lh: number): number {
   const P = base.bottoms.length;
   let best = -1, bd = Infinity;
   for (let b = 0; b <= P; b++) {
-    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - lh / 2;
-    const hi = b === P ? Infinity : base.starts[b] + 4;
+    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - 3;
+    const hi = b === P ? Infinity : base.starts[b] + 2;
     if (cy < lo || cy > hi) continue;
     const mid = ((b === 0 ? (base.tops[0] ?? 0) - 20 : base.bottoms[b - 1]) + (b === P ? (base.bottoms[P - 1] ?? 0) + 20 : base.tops[b])) / 2;
     const dd = Math.abs(cy - mid);
@@ -848,7 +848,8 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   const ratioOf = (pics: Pic[]) => (pics.length > 1 ? 1 : shapeOf(pics[0]?.r));
   /* Where every photo goes: by default each recording's photos beside its paragraph; a photo that was moved beside the
      paragraph and line it was put at, or in a row between two paragraphs. skip: leave one out (the one held). */
-  const assemble = (skip?: string) => {
+  const assemble = (skip?: string, extra?: Record<string, Pos>) => {
+    const at0 = extra ? { ...pos, ...extra } : pos;
     const blocks: { spot: Spot; ch: number; tiles: { key: string; pics: Pic[]; r: Rect }[] }[] = [];
     const singles: { key: string; pics: Pic[]; w: number; h: number; at: Pos }[] = [];
     const betw = new Map<number, (Tile & { o: number; w?: number })[]>();
@@ -866,7 +867,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       const stay: Tile[] = [];
       for (const tl of st.tiles) {
         if (tl.key === skip || (away !== null && tl.pics[0] === photos[away])) continue;
-        const at = pos[tl.key];
+        const at = at0[tl.key];
         if (at?.off) continue;
         const tile = { key: tl.key, pics: tl.pics, ratio: ratioOf(tl.pics) };
         if (!at) stay.push(tile); else if (at.b !== undefined) putBetween(tile, at); else single(tile, at);
@@ -891,11 +892,11 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       if (pl.id === skip || pl.idx[0] === away) continue;
       const pics = pl.idx.map((k) => photos[k]).filter(Boolean);
       if (!pics.length) continue;
-      const at = pos[pl.id] ?? { x: 0, y: 0 };
+      const at = at0[pl.id] ?? { x: 0, y: 0 };
       const tile = { key: pl.id, pics, ratio: ratioOf(pics) };
       if (at.b !== undefined) putBetween(tile, at); else single(tile, at);
     }
-    const pa = skip === 'preview' ? undefined : pos.preview;
+    const pa = skip === 'preview' ? undefined : at0.preview;
     if (pv && pa) {
       const tile = { key: 'preview', pics: [] as Pic[], ratio: pv.r };
       if (pa.b !== undefined) putBetween(tile, pa); else single(tile, pa);
@@ -926,7 +927,10 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     }
     return out;
   };
-  const A = assemble();
+  /* the gap a held photo would go into if let go now: its line shows, and the photo leaves the words alone meanwhile */
+  type Gap = { id: string; b: number; at: number };
+  const [inGap, setGap] = useState<Gap | null>(null);
+  const A = assemble(inGap?.id);
   const { blocks, singles } = A;
   /* photos placed by hand: where they were put, in paragraph and line; one saved as a plain position (an older
      version) is placed against the page without the hand-placed photos */
@@ -960,11 +964,15 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   }
   for (const sg of singles) if (sg.key !== 'preview') tiles.push({ key: sg.key, pics: sg.pics, r: rects[sg.key] });
   for (const rs of A.brow.values()) for (const r of rs) for (const it of r.items) if (it.key !== 'preview') tiles.push({ key: it.key, pics: it.pics, r: brects[it.key] });
+  /* the held photo stays on the page (under the finger) while it is out of the layout over a gap */
+  const lastTiles = useRef<Record<string, { key: string; pics: Pic[]; r: Rect }>>({});
+  if (inGap && inGap.id !== 'preview' && !tiles.some((tl) => tl.key === inGap.id) && lastTiles.current[inGap.id]) tiles.push(lastTiles.current[inGap.id]);
+  useEffect(() => { lastTiles.current = Object.fromEntries(tiles.map((tl) => [tl.key, tl])); });
   const previewRect = rects.preview ?? brects.preview;
 
   /* where each photo was when the finger went down; read only inside the gesture handlers */
   type Round = { rects: Record<string, Rect>; base: typeof others; sizes: Record<string, { w: number; h: number }>; ratios: Record<string, number>;
-    brow: Assembled['brow']; brects: Record<string, Rect>; between: Record<string, boolean> };
+    brow: Assembled['brow']; brects: Record<string, Rect>; between: Record<string, boolean>; landRect?: (id: string, at: Pos) => Rect | null };
   const now = useRef<Round>({ rects: {}, base: others, sizes: {}, ratios: {}, brow: A.brow, brects: {}, between: {} });
   const last = useRef<{ id: string; at: Pos } | null>(null);
   const moveTo = useRef(onMove);
@@ -978,6 +986,12 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     now.current = {
       rects: { ...Object.fromEntries(tiles.map((tl) => [tl.key, tl.r])), ...(previewRect ? { preview: previewRect } : {}) },
       base: others, sizes, ratios, brow: B.brow, brects: obrects, between,
+      /* where a photo would be if it were put there: the page laid out once with it */
+      landRect: (id: string, at: Pos) => {
+        const A2 = assemble(undefined, { [id]: at });
+        const r2 = run([...A2.blocks.map((b) => b.spot), ...A2.singles.map((sg) => spotOf(sg))], A2.rowsAt);
+        return betweenRects(A2, r2.rowTops)[id] ?? r2.rects[id] ?? null;
+      },
     };
     moveTo.current = onMove;
   });
@@ -1007,24 +1021,42 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
      side, or a gap between paragraphs) the page reflows on the next frame. Only the lines that move are redrawn, and
      photos and stickers whose place didn't change aren't touched, so this keeps up with the finger. */
   const frame = useRef(0);
-  /* Going into a row between two paragraphs waits a moment (the finger has to stay at the boundary), so a finger only
-     passing over a gap doesn't open a row and close it again, moving the page under it. What is shown is what a
-     let-go keeps (last). */
-  const waiting = useRef<{ sig: string; timer?: ReturnType<typeof setTimeout> }>({ sig: '' });
-  const settle = () => { clearTimeout(waiting.current.timer); waiting.current = { sig: '' }; };
+  /* What is shown is what a let-go keeps (last). */
   const place = useCallback((id: string, at: Pos) => {
     const sig = `${id}|${at.p}|${at.k}|${at.x}|${at.w}|${at.b}|${at.o}`;
-    if (sig === shown.current || sig === waiting.current.sig) return;
-    settle();
-    const go = () => {
-      waiting.current = { sig: '' };
-      shown.current = sig; last.current = { id, at };
-      cancelAnimationFrame(frame.current);
-      frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
-    };
-    if (at.b !== undefined && last.current?.at.b !== at.b && posNow.current[id]?.b !== at.b) waiting.current = { sig, timer: setTimeout(go, 150) };
-    else go();
+    if (sig === shown.current) return;
+    shown.current = sig; last.current = { id, at };
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
   }, [setLive]);
+  /* The gap between two paragraphs: with the finger staying there a moment, a line shows across it (or, among photos
+     already in a row there, between them), the held photo leaves the words alone, and a let-go puts it there. A finger
+     only passing over a gap shows nothing. */
+  const gapNow = useRef<{ g: Gap | null; timer?: ReturnType<typeof setTimeout>; key: string }>({ g: null, key: '' });
+  const settle = () => { clearTimeout(gapNow.current.timer); gapNow.current.timer = undefined; gapNow.current.key = gapNow.current.g ? `${gapNow.current.g.id}|${gapNow.current.g.b}` : ''; };
+  const showGap = useCallback((id: string, at: Pos, index: number) => {
+    const gn = gapNow.current, key = `${id}|${at.b}`;
+    if (gn.g && gn.g.id === id && gn.g.b === at.b) {
+      last.current = { id, at };
+      if (gn.g.at !== index) { gn.g = { id, b: at.b!, at: index }; setGap(gn.g); }
+      return;
+    }
+    if (gn.timer && gn.key === key) return;
+    clearTimeout(gn.timer);
+    gn.key = key;
+    gn.timer = setTimeout(() => {
+      gn.timer = undefined;
+      gn.g = { id, b: at.b!, at: index };
+      last.current = { id, at }; shown.current = '';
+      setGap(gn.g);
+      Haptics.selectionAsync().catch(() => {});
+    }, 120);
+  }, []);
+  const hideGap = useCallback(() => {
+    const gn = gapNow.current;
+    clearTimeout(gn.timer); gn.timer = undefined; gn.key = '';
+    if (gn.g) { gn.g = null; setGap(null); }
+  }, []);
   const grab = useCallback((id: string) => {
     const nw = now.current, sz = nw.sizes[id] ?? { w: 0, h: 0 };
     held.current = { ...sz, r: nw.ratios[id] ?? (sz.w ? sz.h / sz.w : 0.75), from: !!nw.between[id] };
@@ -1039,15 +1071,11 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
      among the photos already there, at the place the finger is over. */
   const decide = useCallback((id: string, x: number, y: number, w: number, h: number, fgx: number, fgy: number) => {
     const nw = now.current;
-    const cx = x + w / 2, cy = y + h / 2;
-    let b = boundaryAt(nw.base, fgy, lh);
+    const cy = y + h / 2;
+    const b = boundaryAt(nw.base, fgy, lh);
     const sp = toSpot(id, x, y, w, h, nw.base, W, lh, size);
-    /* The places don't exclude each other: they are told apart by where across the page the photo is held. Held in the
-       middle with the finger at the gap between two paragraphs (or parts of the day), it goes into the row there. Held to
-       a side, it goes beside the words wherever it is, across two paragraphs too, and they go around it. Once in a row
-       it takes a wider move to a side to come out again, so it doesn't flicker between the two. */
-    const inRow = last.current?.id === id && last.current.at.b !== undefined;
-    if (b >= 0 && Math.abs(cx - W / 2) > W * (inRow ? 0.22 : 0.15)) b = -1;
+    /* With the finger in the white space between two paragraphs (or parts of the day) the gap's line shows and a let-go
+       puts the photo there; anywhere else it goes beside the words, across two paragraphs too, and they go around it. */
     if (b >= 0) {
       const rs = nw.brow.get(b) ?? [];
       const list = rs.flatMap((r) => r.items).filter((it) => it.key !== id);
@@ -1058,9 +1086,10 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       at = Math.min(at, list.length);
       const prev = list[at - 1]?.o, next = list[at]?.o;
       const o = prev === undefined && next === undefined ? 0 : prev === undefined ? next! - 1 : next === undefined ? prev + 1 : (prev + next) / 2;
-      place(id, { x: 0, y: 0, b, o, w: Math.round(w) });   // the size it has as it is carried
+      showGap(id, { x: 0, y: 0, b, o, w: Math.round(w) }, at);   // the size it has as it is carried
       return;
     }
+    hideGap();
     /* beside the words the photo is where the finger has it, and the words go around it there as it moves (in steps of
        a few points); near an edge it goes against the edge */
     if (sp.x > 0 && sp.x < W - w) sp.x = Math.round(sp.x / 6) * 6;
@@ -1078,7 +1107,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     }
     /* the words go around the photo where the finger has it, so photo and words are one layer */
     place(id, { x: sp.x, y, p: sp.p, k, w });
-  }, [W, lh, size, place]);
+  }, [W, lh, size, place, showGap, hideGap]);
   /* where the held photo is now: the finger on the page and the point of the photo it holds. Its size beside the words is
      the one it had there (or two fingers gave it); one taken from a row between paragraphs has the usual size. */
   const move = useCallback((id: string, gx: number, gy: number, fx: number, fy: number, want: number, sy: number, sx: number) => {
@@ -1110,6 +1139,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     setHolding(null);
     const id = heldId.current, bn = binNow.current;
     settle();
+    hideGap();
     heldId.current = null;
     dragging.current?.(false);
     edge.current?.(null);
@@ -1121,13 +1151,13 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     const lt = last.current;
     if (lt) { setLive((s) => ({ ...s, [lt.id]: lt.at })); moveTo.current(lt.id, lt.at); }
     last.current = null;
-  }, [setLive]);
+  }, [setLive, hideGap]);
   /* A photo carried in from the bottom of the page: it is held over the page by the screen (so it follows the finger
      smoothly) and tells the page where it is (top-left, size); the page makes room, and says where it would land. */
   const carry = useCallback((c: { x: number; y: number; w: number; h: number; gx: number; gy: number } | null, lift?: number[]) => {
     if (!c) {
       cancelAnimationFrame(frame.current);
-      settle();
+      settle(); hideGap();
       shown.current = ''; last.current = null;
       setPv(null); setAway(null);
       setLive((s) => { if (!('preview' in s)) return s; const n = { ...s }; delete n.preview; return n; });
@@ -1136,10 +1166,13 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     }
     if (!shown.current.startsWith('preview')) { setPv({ r: c.h / c.w }); setAway(lift?.[0] ?? null); setFront('preview'); }
     decide('preview', c.x, c.y, c.w, c.h, c.gx, c.gy);
-  }, [decide, setLive]);
+  }, [decide, setLive, hideGap]);
+  /* where a photo carried in from the bottom lands: its place on the page, or (over a gap) where it will be once put there */
   const landing = useCallback(() => {
-    const lt = last.current, rect = now.current.rects.preview;
-    return lt && lt.id === 'preview' && rect ? { at: lt.at, rect } : null;
+    const lt = last.current;
+    if (!lt || lt.id !== 'preview') return null;
+    const rect = gapNow.current.g?.id === 'preview' ? now.current.landRect?.('preview', lt.at) : now.current.rects.preview;
+    return rect ? { at: lt.at, rect } : null;
   }, []);
   const nudge = useCallback((dy: number) => {
     const id = heldId.current;
@@ -1285,6 +1318,25 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
               : <Image source={src(tl.pics[0])} contentFit="cover" style={[StyleSheet.absoluteFill, { borderRadius: 8 }]} />}
           </Movable>
         ))}
+        {/* the gap's line: across the page between the two paragraphs, or, among photos already in a row there, between them */}
+        {inGap ? (() => {
+          const P = paras.length, b = inGap.b;
+          const items = (A.brow.get(b) ?? []).flatMap((r) => r.items).filter((it) => it.key !== inGap.id);
+          if (items.length) {
+            const ra = items[inGap.at - 1] && brects[items[inGap.at - 1].key], rb = items[inGap.at] && brects[items[inGap.at].key];
+            const ref = (ra ?? rb)!;
+            const x = ra && rb && Math.abs(ra.y - rb.y) < 1 ? (ra.x + ra.w + rb.x) / 2 : ra ? ra.x + ra.w + GT / 2 + 2 : rb!.x - GT / 2 - 2;
+            return <View pointerEvents="none" style={[d.gapV, { left: x - 1.25, top: ref.y, height: ref.h, backgroundColor: t.red }]} />;
+          }
+          const gy = b === 0 ? (tops[0] ?? 0) - 10 : b === P ? (bottoms[P - 1] ?? 0) + 12 : ((bottoms[b - 1] ?? 0) + (tops[b] ?? 0)) / 2;
+          return (
+            <View pointerEvents="none" style={[d.gapH, { top: gy - 3 }]}>
+              <View style={[d.gapDot, { backgroundColor: t.red }]} />
+              <View style={[d.gapLine, { backgroundColor: t.red }]} />
+              <View style={[d.gapDot, { backgroundColor: t.red }]} />
+            </View>
+          );
+        })() : null}
         {onChoose ? tiles.map((tl) => {
           const on = !!chosen?.has(tl.key);
           return (
@@ -1409,6 +1461,10 @@ const d = StyleSheet.create({
   liftBtn: { paddingHorizontal: 12, height: 36, justifyContent: 'center' },
   liftHint: { fontSize: 11.5, textAlign: 'center' },
   slot: { position: 'absolute', left: 0, height: 2.5, borderRadius: 1.5, zIndex: 9 },
+  gapH: { position: 'absolute', left: -3, right: -3, height: 6, flexDirection: 'row', alignItems: 'center', zIndex: 3 },
+  gapLine: { flex: 1, height: 2 },
+  gapDot: { width: 6, height: 6, borderRadius: 3 },
+  gapV: { position: 'absolute', width: 2.5, borderRadius: 1.25, zIndex: 3 },
   /* a sticker's shadow follows its own outline: on the phone from the picture's edge, on the web as a drop-shadow filter */
   stickerShadow: Platform.OS === 'web' ? ({ filter: 'drop-shadow(0 1.5px 2px rgba(0,0,0,0.18))' } as object)
     : { shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2.5, shadowOffset: { width: 0, height: 1.5 } },
