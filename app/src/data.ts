@@ -45,7 +45,7 @@ const zh = {
   file: '收进今天',
   /* --- new direction --- */
   hi: (night: boolean): string => night ? '晚上好' : '下午好', ask0: '今天过得怎么样？', bubbleMore: '下午说过一段，接着说？', bubbleNone: '说一句也好',
-  photoHow: '按编号说说每张照片就好，比如“一号是……，三到六号是……”，我们会对上号。',
+  photoHow: '排版只整理文字。排好以后，长按下面的照片，拖到页面上想放的地方。',
   dragHow: '长按一张照片，拖到页面里：可以放在文字旁边，也可以放在两段之间，一行最多三张。',
   dragHint: '拖动照片，文字会自己让开', discarded: '这段不要了', releaseCancel: '松开手指，这段就不要了',
   micDenied: '要录音，需要打开麦克风权限', cameraDenied: '要拍照，需要打开相机权限', openSettings: '去设置',
@@ -167,7 +167,7 @@ const en: typeof zh = {
   file: 'Add to today',
   /* --- new direction --- */
   hi: (night) => night ? 'Good evening' : 'Good afternoon', ask0: 'How was your day?', bubbleMore: 'You talked this afternoon. Carry on?', bubbleNone: 'Even one sentence is enough',
-  photoHow: 'Just describe each photo by its number, like “Number one is…, three to six are…”. We’ll match them up.',
+  photoHow: 'Lay out tidies the words only. Afterwards, hold a photo below and drag it onto the page wherever you want it.',
   dragHow: 'Hold a photo and drag it onto the page: beside the words, or between two paragraphs, up to three in a row.',
   dragHint: 'Drag a photo and the words move out of its way', discarded: 'Discarded', releaseCancel: 'Let go to discard',
   micDenied: 'Turn on the microphone to record', cameraDenied: 'Turn on the camera to take photos', openSettings: 'Open Settings',
