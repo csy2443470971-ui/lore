@@ -274,6 +274,32 @@ export default function App() {
       return { ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } };
     });
   }
+  /* a photo taken off the page: one put there by hand goes; one laid out with its words is marked off. Either way it
+     stays among the thumbnails and can be put back */
+  function offPage(key: string) {
+    update(cur, (d) => {
+      if ((d.placed ?? []).some((p) => p.id === key)) {
+        const moved = { ...d.moved }; delete moved[key];
+        return { ...d, placed: d.placed!.filter((p) => p.id !== key), moved };
+      }
+      return { ...d, moved: { ...d.moved, [key]: { ...(d.moved?.[key] ?? { x: 0, y: 0 }), off: true } } };
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }
+  /* a paragraph (its item) moved to go before another item, or to the end of what is laid out; photos kept by item
+     and part move with their items */
+  function moveItem(from: number, before: number) {
+    const d = day;
+    if (from >= d.laid || before > d.laid || before === from || before === from + 1) return;
+    const order = d.said.map((_, i) => i);
+    order.splice(from, 1);
+    order.splice(before > from ? before - 1 : before, 0, from);
+    const now = new Map(order.map((old, i) => [old, i]));
+    const re = (k: string) => { const m = /^(\d+)-(\d+)$/.exec(k); return m ? `${now.get(+m[1]) ?? +m[1]}-${m[2]}` : k; };
+    remember(cur, d);
+    update(cur, () => ({ ...d, said: order.map((i) => d.said[i]), moved: d.moved && Object.fromEntries(Object.entries(d.moved).map(([k, v]) => [re(k), v])) }));
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }
   /* photos kept before the page knew their shape are measured now, once */
   useEffect(() => {
     const key = cur;
@@ -655,7 +681,7 @@ export default function App() {
                   said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} indent={indent} onCamera={camera} onPick={pick} onOpen={setPane} onRecord={rec}
                   onSaved={(x) => { update(cur, (d) => ({ ...d, said: [...d.said, x] })); grow(cur); note(cur); }} onLayout={layout} onUndo={past[cur]?.length ? undo : undefined} onMerge={mergeUp} onNotice={setNotice}
                   placed={day.placed} moved={day.moved} onText={editText}
-                  onPlace={placePhoto}
+                  onPlace={placePhoto} onOffPage={offPage} onReorder={moveItem}
                   onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))}
                   stickers={day.stickers} slap={slap} mine={mine} onAddSticker={addSticker} onSticker={moveSticker} onMakeSticker={makeSticker} onPhoto={onPhoto} />
                 )}
