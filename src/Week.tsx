@@ -1,10 +1,10 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Page, Stream } from './Doc';
 import { Day } from './session';
 import { SZ } from './theme';
-import { Round, useFace, useS, useT } from './ui';
+import { Round, Text, useFace, useS, useT } from './ui';
 
 const still = () => {};
 

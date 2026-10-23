@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { SharedValue, useSharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -7,7 +7,7 @@ import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { Pic, Unit, unitsOf } from './session';
 import { SZ } from './theme';
-import { useT } from './ui';
+import { Text, useT } from './ui';
 
 export const src = (p: Pic) => (p.uri ? { uri: p.uri } : p.asset);
 

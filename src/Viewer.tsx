@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PixelRatio, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { PixelRatio, Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { Asset } from 'expo-asset';
 import { Directory, File, Paths } from 'expo-file-system';
@@ -13,7 +13,7 @@ import { Pic } from './session';
 import { shot } from './Share';
 import { StickerBox } from './StickerBox';
 import { stickerSrc } from './stickers';
-import { useS } from './ui';
+import { Text, useS } from './ui';
 
 const src = (p: Pic) => (p.uri ? { uri: p.uri } : p.asset);
 const INK = '#F2EFE8', DIM = '#0E0E0D', PANEL = 'rgba(38,37,34,0.86)';

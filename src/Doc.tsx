@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Dimensions, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Re, { SharedValue, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -14,7 +14,7 @@ import { stickerSrc } from './stickers';
 import { OUTLINES } from './outlines';
 import { fileUri } from './store';
 import { SZ } from './theme';
-import { useFace, useLang, useS, useT } from './ui';
+import { Text, TextInput, useFace, useLang, useS, useT } from './ui';
 
 const src = (p: Pic) => (p.uri ? { uri: p.uri } : p.asset);
 

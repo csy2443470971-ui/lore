@@ -2,6 +2,7 @@ import ExpoModulesCore
 import Vision
 import CoreImage
 import UIKit
+import CoreText
 
 struct LiftError: Error, CustomStringConvertible {
   let description: String
@@ -20,6 +21,26 @@ public class LoreVisionModule: Module {
 
     /* the object inside a region the person circled: x, y, w, h are fractions of the photo, from its top left. Vision
        finds the object's own outline inside that region, so a rough circle is enough */
+    /* whether a font (by its PostScript name) is on the phone and can be used now */
+    Function("fontReady") { (name: String) -> Bool in
+      return UIFont(name: name, size: 12) != nil
+    }
+
+    /* fetches fonts Apple offers to download (Songti and the like aren't on an iPhone until an app asks for them);
+       resolves true once all of them can be used */
+    AsyncFunction("fetchFont") { (names: [String], promise: Promise) in
+      if names.allSatisfy({ UIFont(name: $0, size: 12) != nil }) { promise.resolve(true); return }
+      let descriptors = names.map { CTFontDescriptorCreateWithNameAndSize($0 as CFString, 0) } as CFArray
+      var done = false
+      CTFontDescriptorMatchFontDescriptorsWithProgressHandler(descriptors, nil) { state, _ in
+        if state == .didFinish && !done {
+          done = true
+          DispatchQueue.main.async { promise.resolve(names.allSatisfy { UIFont(name: $0, size: 12) != nil }) }
+        }
+        return true
+      }
+    }
+
     AsyncFunction("liftIn") { (uri: String, x: Double, y: Double, w: Double, h: Double) -> String? in
       let photo = try Self.photo(uri)
       let e = photo.extent

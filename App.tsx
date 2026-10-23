@@ -21,7 +21,8 @@ import { agentOn, fixText, readPage, sectionsOf } from './src/agent';
 import { dayKey, isDayKey, isSpanKey, keepPhoto, loadDays, loadMine, relative, saveDay, saveMine } from './src/store';
 import { useLive } from './src/live';
 import { dark as darkT, light as lightT } from './src/theme';
-import { DotField, LangCtx, Notice, ThemeCtx, Toast } from './src/ui';
+import { DotField, FontCtx, LangCtx, Notice, ThemeCtx, Toast } from './src/ui';
+import { FONT_KEYS, FontKey, useChineseFace } from './src/fonts';
 import { Home } from './src/Home';
 import { Archive, Insights, Settings } from './src/Screens';
 import { DayMenu } from './src/DayMenu';
@@ -95,6 +96,8 @@ export default function App() {
   const [voice, setVoiceState] = useState(true);       // voice bars at the top left of what was said
   const [indent, setIndentState] = useState(false);    // first-line indent on the page
   const [where, setWhereState] = useState(false);      // record where each day was written
+  const [font, setFontState] = useState<FontKey>('song');   // the Chinese face of the whole app
+  const { face: cnFace, fetching: fontFetching } = useChineseFace(font);
   const [pane, setPane] = useState<Pane>(null);
   const [today, setToday] = useState(() => dayKey());
   const [days, setDays] = useState<Record<string, Day>>(() => ({ [today]: { ...EMPTY, photos: SEED } }));
@@ -117,7 +120,8 @@ export default function App() {
   const via = useRef<'live' | 'audio'>('audio');      // which one is recording: Apple's recogniser, or expo-audio
 
   useEffect(() => {
-    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice', 'qd-indent', 'qd-place']).then((kv) => {
+    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice', 'qd-indent', 'qd-place', 'qd-font']).then((kv) => {
+      const f = kv[6][1] as FontKey; if (FONT_KEYS.includes(f)) setFontState(f);
       if (kv[5][1] === '1') setWhereState(true);
       if (kv[4][1] === '1') setIndentState(true);
       if (kv[2][1] === '0') setGrammarState(false);
@@ -130,6 +134,7 @@ export default function App() {
   const setLang = (l: Lang) => { setLangState(l); AsyncStorage.setItem('qd-lang', l).catch(() => {}); };
   const setGrammar = (g: boolean) => { setGrammarState(g); AsyncStorage.setItem('qd-grammar', g ? '1' : '0').catch(() => {}); };
   const setVoice = (v: boolean) => { setVoiceState(v); AsyncStorage.setItem('qd-voice', v ? '1' : '0').catch(() => {}); };
+  const setFont = (f: FontKey) => { setFontState(f); AsyncStorage.setItem('qd-font', f).catch(() => {}); };
   const setIndent = (v: boolean) => { setIndentState(v); AsyncStorage.setItem('qd-indent', v ? '1' : '0').catch(() => {}); };
   /* turning "Record where you write" on asks for location once; without it the setting stays off */
   const setWhere = async (v: boolean) => {
@@ -630,6 +635,7 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <LangCtx.Provider value={lang}>
+      <FontCtx.Provider value={cnFace}>
         <ThemeCtx.Provider value={t}>
           <View style={[styles.root, { backgroundColor: t.b }]}>
             <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -658,12 +664,13 @@ export default function App() {
                 {ranging ? <RangePicker today={today} has={has} onClose={() => setRanging(false)} onPick={combine} /> : null}
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
-                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} where={where} setWhere={setWhere} />
+                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} font={font} setFont={setFont} fontFetching={fontFetching} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} where={where} setWhere={setWhere} />
                 <Toast notice={notice} onClose={closeNotice} />
               </>
             )}
           </View>
         </ThemeCtx.Provider>
+      </FontCtx.Provider>
       </LangCtx.Provider>
     </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActionSheetIOS, Alert, Animated, Dimensions, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActionSheetIOS, Alert, Animated, Dimensions, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -15,7 +15,7 @@ import { agentOn, Heard, marked, transcribe } from './agent';
 import { Pic, Placed, Pos, Said, Sticker, Unit, unitsOf } from './session';
 import { keepRecording } from './store';
 import { SZ } from './theme';
-import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, useTimer } from './ui';
+import { Glow, Notice, RecState, Round, TalkKey, Text, TextInput, useFace, useLang, useS, useT, useTimer } from './ui';
 
 type Rect = { x: number; y: number; w: number; h: number };
 

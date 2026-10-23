@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ent, Kind, Lang, MONTH_MIN } from './data';
 import { PHOTO } from './images';
 import { F, SZ } from './theme';
-import { Icon, Meta, Panel, Round, s as us, useFace, useLang, useS, useT } from './ui';
+import { FONT_KEYS, FontKey } from './fonts';
+import { Icon, Meta, Panel, Round, s as us, Text, useFace, useLang, useS, useT } from './ui';
 
 type Mode = 'light' | 'dark' | 'auto';
 
@@ -259,7 +260,8 @@ function Reminders() {
   return <Row k={S.sRemind} sub={S.sRemindSub} extra={<Seg value={r} onChange={setR} options={[['night', S.rNight], ['week', S.rWeek], ['off', S.rOff]]} />} />;
 }
 
-export function Settings({ open, onClose, mode, setMode, lang, setLang, grammar, setGrammar, voice, setVoice, indent, setIndent, where, setWhere }: {
+export function Settings({ open, onClose, mode, setMode, lang, setLang, font, setFont, fontFetching, grammar, setGrammar, voice, setVoice, indent, setIndent, where, setWhere }: {
+  font: FontKey; setFont: (f: FontKey) => void; fontFetching: boolean;
   open: boolean; onClose: () => void; mode: Mode; setMode: (m: Mode) => void; lang: Lang; setLang: (l: Lang) => void;
   grammar: boolean; setGrammar: (g: boolean) => void; voice: boolean; setVoice: (v: boolean) => void;
   indent: boolean; setIndent: (v: boolean) => void;
@@ -275,6 +277,7 @@ export function Settings({ open, onClose, mode, setMode, lang, setLang, grammar,
         <Text style={[a.lede, { color: t.mut, fontFamily: face.italic, marginTop: 0, marginBottom: 18 }]}>{S.setLede}</Text>
         <Row k={S.sLook} sub={S.sLookSub} extra={<Seg value={mode} onChange={setMode} options={[['light', S.light], ['dark', S.dark], ['auto', S.auto]]} />} />
         <Row k={S.sLang} sub={S.sLangSub} extra={<Seg value={lang} onChange={setLang} options={[['zh', '中文'], ['en', 'English']]} />} />
+        <Row k={S.sFont} sub={fontFetching ? S.fontFetching : S.sFontSub} extra={<Seg value={font} onChange={setFont} options={FONT_KEYS.map((f) => [f, S.fontNames[f]] as [FontKey, string])} />} />
         <WritingStyle grammar={grammar} setGrammar={setGrammar} />
         <Row k={S.sVoice} sub={S.sVoiceSub}><Toggle key={String(voice)} on={voice} onChange={setVoice} /></Row>
         <Row k={S.sIndent} sub={S.sIndentSub}><Toggle key={String(indent)} on={indent} onChange={setIndent} /></Row>
