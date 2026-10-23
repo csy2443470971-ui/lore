@@ -170,7 +170,7 @@ const en: typeof zh = {
   photoHow: 'Lay out tidies the words only. Afterwards, hold a photo below and drag it onto the page wherever you want it.',
   dragHow: 'Hold a photo and drag it onto the page: beside the words, or between two paragraphs, up to three in a row.',
   dragHint: 'Drag a photo and the words move out of its way', discarded: 'Discarded', releaseCancel: 'Let go to discard',
-  micDenied: 'Turn on the microphone to record', cameraDenied: 'Turn on the camera to take photos', openSettings: 'Open Settings',
+  micDenied: 'Turn on the microphone to record', cameraDenied: 'Turn on the camera to take photos', openSettings: 'Open settings',
   delPhoto: 'Delete photo', delGroup: 'Delete group', ungroup: 'Ungroup',
   pline: { cafe: 'The café by the lake, the window seat was free.', latte: 'An oat latte with a heart in the foam.', sunset: 'Sunset at the bridge, the lake turned orange-pink.', osmanthus: 'The osmanthus is out, the whole street smells of it.', noodles: 'The noodles at the corner, great broth.', hotpot: 'Hotpot until nearly midnight, we talked a lot.', lanterns: 'The moment the lanterns all lit up at once.', causeway: 'Windy on the causeway, so we walked slowly.' },
   heardNothing: 'Didn’t catch that. Try again?', notReached: 'Couldn’t reach Lore. The recording is kept', retry: 'Retry', liveStopped: 'Recording stopped. Tap the red dot to send what was recorded',

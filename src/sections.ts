@@ -39,6 +39,8 @@ const SPOKEN: [RegExp, PartKey][] = [
   [/傍晚|黄昏|下班|日落|after work|dusk|sunset/i, 'dusk'],
   [/晚上|晚饭|夜里|今晚|evening|tonight|dinner|night/i, 'eve'],
 ];
+/* only the first letter capital, never Title Case or capitals throughout */
+export const sentenceCase = (s: string) => (/[A-Za-z]/.test(s.charAt(0)) ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s);
 const spokenPart = (s: string) => SPOKEN.find(([re]) => re.test(s))?.[1] ?? null;
 /* the part of the day a time falls in, by the clock: up to 5 the night before goes on, then morning, midday from 11:30,
    afternoon from 13:30, evening from 18:00 (dusk and early morning only when they are said) */
@@ -57,7 +59,7 @@ export function sectionize<T extends { kind: string; text?: string; day?: string
       if (x.day) { out.push(x); cur = null; order = 0; continue; }    // the next day of a page over several days
       const k = spokenPart(x.text ?? '');
       if (k) said = k;
-      else { out.push(x); cur = x.text ?? ''; }                      // a heading of its own, kept as it is
+      else { out.push({ ...x, text: sentenceCase(x.text ?? '') }); cur = x.text ?? ''; }   // a heading of its own, kept (only its first letter capital)
       continue;
     }
     let k: PartKey | null = said;
