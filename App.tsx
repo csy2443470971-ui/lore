@@ -14,7 +14,7 @@ import { Newsreader_300Light, Newsreader_400Regular, Newsreader_400Regular_Itali
 import { Lang, STR } from './src/data';
 import { PHOTO } from './src/images';
 import { Day, Pos, removePhotos, Said, Sticker } from './src/session';
-import { match, sentences } from './src/match';
+import { sentences } from './src/match';
 import { sectionize, timeRules } from './src/sections';
 import { join, shape } from './src/paragraphs';
 import { agentOn, fixText, readPage, sectionsOf } from './src/agent';
@@ -532,7 +532,7 @@ export default function App() {
      words that haven't had the grammar fix get it once (when "Fix grammar" is on), then every recording that is still
      plain text is matched to photos again, so older words also pick up the photo numbers found mid-sentence */
   async function layout() {
-    const key = cur, d0 = day, count = d0.photos.length;
+    const key = cur, d0 = day;
     setMaking(true);
     const wait = new Promise((r) => setTimeout(r, 2000));
     const fixOne = (t: string) => (t.trim() ? fixText(t, true).catch(() => t) : Promise.resolve(t));
@@ -542,17 +542,13 @@ export default function App() {
         ? { ...x, text: await fixOne(x.text), g: true }
         : { ...x, parts: await Promise.all(x.parts.map(async (p) => ({ ...p, text: await fixOne(p.text) }))), g: true })))
       : said0;
-    /* a recording that names photos by number ("一号是…", "the picture one is…") is split into a part per photo, in code;
-       a photo that already has its words keeps them, and a second mention stays plain text */
-    const taken = new Set(items.flatMap((x) => (x.kind === 'photos' ? x.parts.flatMap((p) => p.unit.idx) : [])));
-    const matched = items.flatMap((x): Said[] => {
-      if (x.kind !== 'talk' || !count) return [x];
-      const m = match(x.text, count);
-      if (!m.parts.length) return [x];
-      const parts = m.parts.map((p) => ({ ...p, unit: { idx: p.unit.idx.filter((i) => !taken.has(i)) } }));
-      parts.forEach((p) => p.unit.idx.forEach((i) => taken.add(i)));
-      return [...(m.before ? [{ kind: 'talk' as const, text: m.before, g: x.g, audio: x.audio, at: x.at, secs: x.secs }] : []),
-        { kind: 'photos' as const, parts, g: x.g, ...(m.before ? {} : { audio: x.audio, at: x.at, secs: x.secs }) }];
+    /* Lay out tidies the words only, for now: no photo goes onto the page with them. The photos stay among the
+       thumbnails under the page, to be put where the person wants them by hand. A recording that named photos is
+       laid out as plain words; a page written on paper keeps its photo. */
+    const matched = items.map((x): Said => {
+      if (x.kind !== 'photos' || x.paper) return x;
+      const { parts, ...rec } = x;
+      return { ...rec, kind: 'talk', text: join(parts.map((p) => p.text)) };
     });
     /* the time-heading node: the day's sentences go out numbered, and each one that starts a new time of day
        ("下午", "after lunch") gets a heading above it; a recording that crosses one is split there */
@@ -580,12 +576,11 @@ export default function App() {
     const said = shape(sectionize(headed), new Set(breaks.map((n) => flat[n]?.s).filter(Boolean)));
     await wait;
     const n = said.length;
-    /* a photo now talked about leaves the spot it was dropped on and goes beside its words; where photos beside
-       paragraphs were dragged to is forgotten, since the paragraphs may have changed */
+    /* photos put on the page by hand stay where they are; where photos beside paragraphs were dragged to is forgotten,
+       since the paragraphs may have changed */
     remember(key, d0);
     update(key, (d) => ({
       ...d, said, laid: n,
-      placed: d.placed?.filter((p) => !p.idx.some((i) => taken.has(i))),
       moved: Object.fromEntries(Object.entries(d.moved ?? {}).filter(([k]) => k.startsWith('p'))),
     }));
     tipDrag({ ...d0, said }, n);
