@@ -18,7 +18,6 @@ import { timeRules } from './src/sections';
 import { join, shape } from './src/paragraphs';
 import { agentOn, fixText, readPage, sectionsOf } from './src/agent';
 import { dayKey, isDayKey, isSpanKey, keepPhoto, loadDays, loadMine, relative, saveDay, saveMine } from './src/store';
-import LoreVision from './modules/lore-vision';
 import { useLive } from './src/live';
 import { dark as darkT, light as lightT } from './src/theme';
 import { DotField, LangCtx, Notice, ThemeCtx, Toast } from './src/ui';
@@ -342,22 +341,14 @@ export default function App() {
       return 'file:' + rel;
     },
   };
+  /* a sticker from a photo: the photo is picked here, then traced around in the full-screen photo (no recognition) */
   async function makeSticker(): Promise<string | null> {
-    if (!LoreVision) { setNotice({ text: S.liftNeedsApp }); return null; }
     const c = await ask([S.shootPhoto, S.library]);
     if (c < 0) return null;
     const a = await one(c === 0);
-    if (!a) return null;
-    setNotice({ text: S.lifting });
-    try {
-      const made = await LoreVision.lift(a.uri);
-      if (!made) { setNotice({ text: S.liftNone }); return null; }
-      setNotice(null);
-      const rel = relative(made);
-      setMine((m) => { const next = [rel, ...m]; saveMine(next); return next; });
-      return 'file:' + rel;
-    } catch { setNotice({ text: S.liftNone }); return null; }
+    return a ? a.uri : null;
   }
+
 
   /* the first page with photos tells the person, once, that photos can be dragged (until the tutorial is designed) */
   function tipDrag(d: Day, laid: number) {

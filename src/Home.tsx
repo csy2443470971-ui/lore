@@ -37,7 +37,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   stickers?: Sticker[]; slap?: string; mine: string[];   // the page's stickers, the one just put on, and those made from photos
   onAddSticker: (s: string, at: { x: number; y: number; w: number; r: number }) => void;
   onSticker: (id: string, at: Partial<Sticker> | null) => void;
-  onMakeSticker: () => Promise<string | null>;        // a sticker cut out of a photo, or null
+  onMakeSticker: () => Promise<string | null>;        // a photo picked to trace a sticker from, or null
   /* from the full-screen photo: delete it, set marks into it, go back to the original, or keep a cut-out sticker */
   onPhoto: { del: (i: number) => void; save: (i: number, uri: string, r: number) => void; restore: (i: number) => void; lifted: (file: string) => string };
   onMerge: (item: number) => void;                    // join a paragraph to the one above it
@@ -72,7 +72,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const [sharing, setSharing] = useState(false);
   const [stickerBox, setStickerBox] = useState(false);                  // the sticker box is open
   const [reading, setReading] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<{ idx: number[]; at: number } | null>(null);   // a photo open full screen          // a paragraph opened to select (and copy) its words
+  const [viewing, setViewing] = useState<{ idx: number[]; at: number; pics?: Pic[]; only?: 'cut' } | null>(null);   // a photo open full screen          // a paragraph opened to select (and copy) its words
   const [bin, setBin] = useState<'on' | 'over' | null>(null);           // a sticker is being carried: the bin shows in the talk key's place
   const [draft, setDraft] = useState('');
   const lift = useRef<{ u: Unit; moved: boolean; carried: boolean } | null>(null);   // a tray photo picked up by a long press
@@ -266,7 +266,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
     if (!area.current) { place(40); return; }
     area.current.measureInWindow((_x, ay) => place(top + 50 + 80 + Math.random() * 60 - ay));
   };
-  const makeSticker = async () => { setStickerBox(false); const sk = await onMakeSticker(); if (sk) putSticker(sk); };
+  const makeSticker = async () => { setStickerBox(false); const uri = await onMakeSticker(); if (uri) setViewing({ idx: [], at: 0, pics: [{ uri }], only: 'cut' }); };
   const scrolled = useCallback(() => { if (lift.current) lift.current.moved = true; }, []);
   const follow = useCallback((x: number, y: number) => handlers.current.carryTo(x, y), []);
   const letGo = useCallback((x: number, y: number) => handlers.current.dropAt(x, y), []);
@@ -444,7 +444,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
       })() : null}
 
       {viewing ? (
-        <Viewer pics={viewing.idx.map((i) => photos[i]).filter(Boolean)} start={viewing.at} mine={mine} onClose={() => setViewing(null)}
+        <Viewer pics={viewing.pics ?? viewing.idx.map((i) => photos[i]).filter(Boolean)} start={viewing.at} mine={mine} only={viewing.only} onClose={() => setViewing(null)}
           onDelete={(k) => { const i = viewing.idx[k]; const rest = viewing.idx.filter((_, j) => j !== k).map((n) => (n > i ? n - 1 : n)); onPhoto.del(i); setViewing(rest.length ? { idx: rest, at: Math.min(k, rest.length - 1) } : null); }}
           onSave={(k, uri, r) => onPhoto.save(viewing.idx[k], uri, r)} onRestore={(k) => onPhoto.restore(viewing.idx[k])}
           onLifted={(file) => putSticker(onPhoto.lifted(file))} onNotice={(text) => onNotice({ text })} />
