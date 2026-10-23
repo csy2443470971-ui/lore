@@ -18,7 +18,7 @@ export function DayMenu({ days, cur, rows, more, onPick, onClose }: {
   const top = useSafeAreaInsets().top + 58;            // just under the title bar
   const row = (o: DayRow) => (
     <Pressable key={o.key} onPress={() => onPick(o.key)} style={({ pressed }) => [m.row, pressed && { opacity: 0.6 }]}>
-      <Text style={[m.label, { color: t.ink, fontFamily: face.title, fontWeight: o.key === cur ? '600' : '400' }]}>{o.label}</Text>
+      <Text numberOfLines={1} style={[m.label, { color: t.ink, fontFamily: face.title, fontWeight: o.key === cur ? '600' : '400' }]}>{o.label}</Text>
       {o.date ? <Text style={[m.date, { color: t.mut }]}>{o.date}</Text> : null}
     </Pressable>
   );

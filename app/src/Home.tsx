@@ -72,7 +72,6 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const [sharing, setSharing] = useState(false);
   const [stickerBox, setStickerBox] = useState(false);                  // the sticker box is open
   const [reading, setReading] = useState<string | null>(null);
-  const [naming, setNaming] = useState<string | null>(null);              // the page's title being renamed
   const [viewing, setViewing] = useState<{ idx: number[]; at: number } | null>(null);   // a photo open full screen          // a paragraph opened to select (and copy) its words
   const [bin, setBin] = useState<'on' | 'over' | null>(null);           // a sticker is being carried: the bin shows in the talk key's place
   const [draft, setDraft] = useState('');
@@ -303,7 +302,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           contentContainerStyle={{ paddingHorizontal: SZ.px, paddingTop: 10, paddingBottom: listBottom, gap: 24 }}
           onContentSizeChange={() => { if (!select && !livePhotos && !dragging && (unlaid.length || real !== 'idle')) scroll.current?.scrollToEnd({ animated: true }); }}>
           {laid > 0 ? <Page key={day} items={said.slice(0, laid)} photos={photos} placed={placed} moved={moved} title={pageTitle} meta={pageMeta} area={area}
-            preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent} onTitle={recording || !onRename ? undefined : () => setNaming(ownTitle || pageTitle)}
+            preview={ghost && over ? { pics: ghost, ...over } : null} voice={voice} indent={indent} onRename={recording ? undefined : onRename} ownTitle={ownTitle}
             onDrag={setDragging} onMove={onMove} onEdit={edit}
             onMerge={recording ? undefined : onMerge} onShare={(item) => setChoosing(new Set([`t${item}`]))} onSelect={setReading}
             onOpen={(idx) => setViewing({ idx, at: 0 })}
@@ -449,21 +448,6 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           onDelete={(k) => { const i = viewing.idx[k]; const rest = viewing.idx.filter((_, j) => j !== k).map((n) => (n > i ? n - 1 : n)); onPhoto.del(i); setViewing(rest.length ? { idx: rest, at: Math.min(k, rest.length - 1) } : null); }}
           onSave={(k, uri, r) => onPhoto.save(viewing.idx[k], uri, r)} onRestore={(k) => onPhoto.restore(viewing.idx[k])}
           onLifted={(file) => putSticker(onPhoto.lifted(file))} onNotice={(text) => onNotice({ text })} />
-      ) : null}
-      {naming !== null ? (
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[StyleSheet.absoluteFill, h.editWrap]}>
-          <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: t.ink + '2E' }]} onPress={() => setNaming(null)} />
-          <View style={[h.sheet, { backgroundColor: t.b, paddingBottom: 16 }]}>
-            <View style={h.sheetBar}>
-              <Pressable hitSlop={10} onPress={() => setNaming(null)}><Text style={{ fontSize: 15, color: t.mut }}>{S.cancel}</Text></Pressable>
-              <Text style={{ fontSize: 13, color: t.mut }}>{S.titleAsk}</Text>
-              <Pressable hitSlop={10} onPress={() => { onRename?.(naming); setNaming(null); }}><Text style={{ fontSize: 15, color: t.ink, fontWeight: '600' }}>{S.editDone}</Text></Pressable>
-            </View>
-            <TextInput value={naming} onChangeText={setNaming} autoFocus selectTextOnFocus returnKeyType="done" selectionColor={t.red}
-              onSubmitEditing={() => { onRename?.(naming); setNaming(null); }}
-              style={[{ fontSize: 22, paddingVertical: 8, color: t.ink, fontFamily: face.title }]} />
-          </View>
-        </KeyboardAvoidingView>
       ) : null}
       {reading !== null ? (
         <View style={[StyleSheet.absoluteFill, h.editWrap]}>
