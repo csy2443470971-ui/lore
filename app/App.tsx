@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActionSheetIOS, Alert, AppState, Linking, Platform, StyleSheet, useColorScheme, View } from 'react-native';
+import { ActionSheetIOS, Alert, AppState, Image as RNImage, Linking, Platform, StyleSheet, useColorScheme, View } from 'react-native';
+import { Asset } from 'expo-asset';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as Haptics from 'expo-haptics';
@@ -12,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Newsreader_300Light, Newsreader_400Regular, Newsreader_400Regular_Italic } from '@expo-google-fonts/newsreader';
 import { Lang, STR } from './src/data';
 import { PHOTO } from './src/images';
-import { Day, removePhotos, Said, Sticker } from './src/session';
+import { Day, Pos, removePhotos, Said, Sticker } from './src/session';
 import { match, sentences } from './src/match';
 import { timeRules } from './src/sections';
 import { join, shape } from './src/paragraphs';
@@ -31,6 +32,8 @@ import { askPlace, wherePlace } from './src/place';
 type Mode = 'light' | 'dark' | 'auto';
 type Pane = null | 'archive' | 'insights' | 'settings';
 const EMPTY: Day = { photos: [], groups: [], said: [], laid: 0 };
+/* a kept photo, with its shape (height over width) so the page can set it in the shape nearest its own */
+const keepShaped = async (a: ImagePicker.ImagePickerAsset) => ({ ...(await keepPhoto(a.uri)), ...(a.width && a.height ? { r: a.height / a.width } : {}) });
 /* web only: ?seed=photos starts today with six sample photos, so the photo flow can be shown without a photo library */
 const SEED = Platform.OS === 'web' && typeof location !== 'undefined' && location.search.includes('seed=photos')
   ? ['cafe', 'latte', 'sunset', 'osmanthus', 'noodles', 'hotpot'].map((k) => ({ asset: PHOTO[k] })) : [];
@@ -251,12 +254,38 @@ export default function App() {
     setPane(null);
   }
 
+  /* a photo is on the page once: dropped again it moves to the new place, dropped for the first time it is added */
+  function placePhoto(idx: number[], at: Pos) {
+    update(cur, (d) => {
+      const first = idx[0];
+      const was = (d.placed ?? []).find((p) => p.idx[0] === first);
+      if (was) return { ...d, moved: { ...d.moved, [was.id]: at } };
+      for (let i = 0; i < d.laid; i++) {
+        const x = d.said[i];
+        const j = x.kind === 'photos' ? x.parts.findIndex((p) => p.unit.idx[0] === first) : -1;
+        if (j >= 0) return { ...d, moved: { ...d.moved, [`${i}-${j}`]: at } };
+      }
+      const id = 'p' + Date.now().toString(36);
+      return { ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } };
+    });
+  }
+  /* photos kept before the page knew their shape are measured now, once */
+  useEffect(() => {
+    const key = cur;
+    days[key]?.photos.forEach((p, i) => {
+      if (p.r) return;
+      const set = (w: number, h: number) => { if (w && h) update(key, (d) => ({ ...d, photos: d.photos.map((q, k) => (k === i && !q.r ? { ...q, r: h / w } : q)) })); };
+      if (p.uri) RNImage.getSize(p.uri, set, () => {});
+      else if (p.asset !== undefined) { const a = Asset.fromModule(p.asset); set(a.width ?? 0, a.height ?? 0); }
+    });
+  }, [cur, days[cur]?.photos.length]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   async function pick() {
     const key = cur;
     try {
       const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, orderedSelection: true, selectionLimit: 60, quality: 0.7 });
       if (r.canceled || !r.assets.length) return;
-      const kept = await Promise.all(r.assets.map((a) => keepPhoto(a.uri)));
+      const kept = await Promise.all(r.assets.map(keepShaped));
       update(key, (d) => ({ ...d, photos: [...d.photos, ...kept] }));
       grow(key); note(key);
       Haptics.selectionAsync().catch(() => {});
@@ -269,7 +298,7 @@ export default function App() {
       if (!perm.granted) { setNotice({ text: S.cameraDenied, action: settings }); return; }
       const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 });
       if (r.canceled || !r.assets.length) return;
-      const kept = await keepPhoto(r.assets[0].uri);
+      const kept = await keepShaped(r.assets[0]);
       update(key, (d) => ({ ...d, photos: [...d.photos, kept] }));
       grow(key); note(key);
     } catch { /* no camera, e.g. the simulator */ }
@@ -300,13 +329,14 @@ export default function App() {
     if (!a) return;
     const c = await ask([S.readYes, S.readNo], S.readAsk);
     if (c < 0) return;
-    const kept = { ...(await keepPhoto(a.uri)), ...(a.width && a.height ? { r: a.height / a.width } : {}) };
+    const kept = await keepShaped(a);
     let text = '';
     if (c === 0) {
       setNotice({ text: S.reading });
       try { text = await readPage(a.uri); setNotice(null); } catch { setNotice({ text: S.readFailed }); }
     }
     const [lead = '', ...rest] = text.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+    // eslint-disable-next-line react-hooks/purity -- runs once the photo has been taken, never while rendering
     const at = Date.now();
     update(key, (d) => {
       const n = d.photos.length;
@@ -619,7 +649,7 @@ export default function App() {
                   said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} indent={indent} onCamera={camera} onPick={pick} onOpen={setPane} onRecord={rec}
                   onSaved={(x) => { update(cur, (d) => ({ ...d, said: [...d.said, x] })); grow(cur); note(cur); }} onLayout={layout} onUndo={past[cur]?.length ? undo : undefined} onMerge={mergeUp} onNotice={setNotice}
                   placed={day.placed} moved={day.moved} onText={editText}
-                  onPlace={(idx, at) => { const id = 'p' + Date.now().toString(36); update(cur, (d) => ({ ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } })); }}
+                  onPlace={placePhoto}
                   onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))}
                   stickers={day.stickers} slap={slap} mine={mine} onAddSticker={addSticker} onSticker={moveSticker} onMakeSticker={makeSticker} onPhoto={onPhoto} />
                 )}

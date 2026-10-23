@@ -16,7 +16,9 @@ export type Said = ({ kind: 'talk'; text: string } & Rec) | ({ kind: 'photos'; p
 export type Placed = { id: string; idx: number[] };
 /* p, k: the paragraph a photo belongs to and the line it starts on; y is only for positions saved before that;
    w: the width it was pinched to */
-export type Pos = { x: number; y: number; p?: number; k?: number; w?: number };
+/* b, o: instead of beside a paragraph, in a row between two paragraphs (b: the paragraph it comes before, o: its order
+   among the photos there, up to three to a row) */
+export type Pos = { x: number; y: number; p?: number; k?: number; w?: number; b?: number; o?: number };
 /* a sticker on the page: s is one from the set ('set:<name>') or one made from a photo ('file:<path inside Documents>');
    it sits over the words (they don't move for it), y down from the top of paragraph p, x from the left; w its width,
    r its tilt in degrees. p = -1: just put on the page at y from the top, not yet tied to a paragraph */

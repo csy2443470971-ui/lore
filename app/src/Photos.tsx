@@ -1,5 +1,8 @@
-import React, { useEffect, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { SharedValue, useSharedValue } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { Pic, Unit, unitsOf } from './session';
@@ -55,59 +58,83 @@ export function Badge({ text, mid }: { text: string; mid?: boolean }) {
 
 export const label = (u: Unit) => (u.idx.length > 1 ? `${u.idx[0] + 1}–${u.idx[u.idx.length - 1] + 1}` : String(u.idx[0] + 1));
 
-/* Today's photos on the writing page. Few photos stay big (three across up to three, four across up to eight,
-   then five); only past three rows do they sit in a white window that scrolls and shows three and a half rows.
-   Photos already on the page are left out. Long-press one to drag it onto the page, or to delete it. */
-export function Tray({ photos, groups, skip, width, select, sel, onToggle, onOpen, onLong, onRelease, cur }: {
-  photos: Pic[]; groups: number[][]; skip?: Set<number>; width: number; select: boolean; sel: number[]; onToggle: (i: number) => void;
-  onOpen: (idx: number[]) => void;                    // a tap opens the photo (or the whole group) full screen, to look at and edit
-  onLong: (u: Unit, x: number, y: number) => void; onRelease: () => void; cur: number;
+/* Every photo of the day, as small square thumbnails, five to a row, numbered. A photo already on the page is dimmed and
+   marked. A tap opens a photo to look at and edit; a long press lifts it, and it follows the finger (moved by the
+   screen, not the page) onto the words, into a gap between paragraphs, or back; let go without moving and the menu opens. */
+export type Lift = {
+  gx: SharedValue<number>; gy: SharedValue<number>;                     // the finger, on the screen: the carried photo is drawn there
+  start: (u: Unit, x: number, y: number, tile: number) => void;        // the long press took hold
+  move: (x: number, y: number) => void;
+  end: (x: number, y: number) => void;                                  // the finger came up
+  stop: () => void;                                                     // the touch was taken away
+};
+export const COLS = 5;
+export function Tray({ photos, groups, used, width, select, sel, onToggle, onOpen, lift }: {
+  photos: Pic[]; groups: number[][]; used: Set<number>; width: number; select: boolean; sel: number[]; onToggle: (i: number) => void;
+  onOpen: (idx: number[]) => void; lift: Lift;
+}) {
+  const gap = SZ.tileGap + 1;
+  const tile = Math.floor((width - gap * (COLS - 1)) / COLS);
+  const units = unitsOf(photos.length, groups);
+  const grouped = new Set(groups.flat());
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
+      {units.map((u) => (
+        <TrayTile key={u.idx.join('-')} u={u} photos={photos} tile={tile} used={used.has(u.idx[0])} select={select} picked={sel.includes(u.idx[0])}
+          locked={select && (grouped.has(u.idx[0]) || used.has(u.idx[0]))} onToggle={onToggle} onOpen={onOpen} lift={lift} />
+      ))}
+    </View>
+  );
+}
+
+function TrayTile({ u, photos, tile, used, select, picked, locked, onToggle, onOpen, lift }: {
+  u: Unit; photos: Pic[]; tile: number; used: boolean; select: boolean; picked: boolean; locked: boolean;
+  onToggle: (i: number) => void; onOpen: (idx: number[]) => void; lift: Lift;
 }) {
   const t = useT();
-  const box = useRef<React.ComponentRef<typeof ScrollView>>(null);
-  const units = unitsOf(photos.length, groups).filter((u) => !skip?.has(u.idx[0]));
-  const cols = photos.length <= 3 ? 3 : photos.length <= 8 ? 4 : 5;
-  /* count rows the way flex-wrap lays them out: a group takes two cells and moves down if it doesn't fit */
-  const rowOf: number[] = [];
-  let rows = units.length ? 1 : 0, used = 0;
-  units.forEach(() => { if (used + 1 > cols) { rows++; used = 0; } used += 1; rowOf.push(rows - 1); });   // a group is one stack, one cell
-  const win = rows > 3;
-  const gap = SZ.tileGap, pad = win ? 8 : 0;
-  const tile = (width - pad * 2 - gap * (cols - 1)) / cols;
   const r = tile > 90 ? 14 : SZ.tileR;
-  const h = win ? pad + 3 * (tile + gap) + tile * 0.5 : rows * tile + (rows - 1) * gap;
-  const grouped = new Set(groups.flat());
-  const curRow = cur >= 0 ? rowOf[cur] : -1;
-  useEffect(() => {
-    if (win && curRow >= 0) box.current?.scrollTo({ y: Math.max(0, (curRow - 1) * (tile + gap)), animated: true });
-  }, [win, curRow, tile, gap]);
+  const it = useRef({ u, select, locked, onToggle, onOpen, lift, tile });
+  useEffect(() => { it.current = { u, select, locked, onToggle, onOpen, lift, tile }; });
+  const onTap = useCallback(() => {
+    const c = it.current;
+    if (c.select) { if (!c.locked && c.u.idx.length === 1) c.onToggle(c.u.idx[0]); return; }
+    c.onOpen(c.u.idx);
+  }, []);
+  const onLift = useCallback((x: number, y: number) => { const c = it.current; c.lift.start(c.u, x, y, c.tile); }, []);
+  const onMove = useCallback((x: number, y: number) => it.current.lift.move(x, y), []);
+  const onEnd = useCallback((x: number, y: number) => it.current.lift.end(x, y), []);
+  const onStop = useCallback(() => it.current.lift.stop(), []);
+  const { gx, gy } = lift;
+  const sent = useSharedValue({ x: 0, y: 0 });
+  /* the handlers only run during a gesture, never while rendering */
+  /* eslint-disable react-hooks/refs */
+  const gesture = useMemo(() => {
+    const tap = Gesture.Tap().maxDuration(250).maxDistance(12).onEnd((_e, ok) => { if (ok) scheduleOnRN(onTap); });
+    const pan = Gesture.Pan().enabled(!select).activateAfterLongPress(280)
+      .onStart((e) => { gx.set(e.absoluteX); gy.set(e.absoluteY); sent.set({ x: e.absoluteX, y: e.absoluteY }); scheduleOnRN(onLift, e.absoluteX, e.absoluteY); })
+      .onUpdate((e) => {
+        gx.set(e.absoluteX); gy.set(e.absoluteY);                       // the photo follows the finger on the screen's own thread
+        const l = sent.get();
+        if (Math.abs(e.absoluteX - l.x) + Math.abs(e.absoluteY - l.y) >= 3) { sent.set({ x: e.absoluteX, y: e.absoluteY }); scheduleOnRN(onMove, e.absoluteX, e.absoluteY); }
+      })
+      .onEnd((e) => { scheduleOnRN(onEnd, e.absoluteX, e.absoluteY); })
+      .onFinalize((_e, ok) => { if (!ok) scheduleOnRN(onStop); });
+    return Gesture.Race(tap, pan);
+  }, [select, gx, gy, sent, onTap, onLift, onMove, onEnd, onStop]);
+  /* eslint-enable react-hooks/refs */
   const ring = <View style={[StyleSheet.absoluteFill, { borderRadius: r, borderWidth: 2.5, borderColor: t.ink }]} />;
+  const group = u.idx.length > 1;
   return (
-    <View style={[{ height: h, overflow: 'hidden' }, win && { backgroundColor: t.panel, borderRadius: SZ.panelR }]}>
-      <ScrollView ref={box} scrollEnabled={win} nestedScrollEnabled contentContainerStyle={{ padding: pad, flexDirection: 'row', flexWrap: 'wrap', gap }} showsVerticalScrollIndicator={false}>
-        {units.map((u, n) => {
-          const dim = cur >= 0 && n !== cur ? 0.45 : 1;
-          if (u.idx.length > 1) {
-            return (
-              <Pressable key={'g' + u.idx[0]} disabled={select} onPress={() => onOpen(u.idx)} delayLongPress={350} onLongPress={(e) => onLong(u, e.nativeEvent.pageX, e.nativeEvent.pageY)} onPressOut={onRelease} style={{ opacity: select ? 0.5 : dim }}>
-                <Stack pics={u.idx.map((i) => photos[i])} size={tile} r={r} />
-                <Badge text={label(u)} mid={tile > 90} />
-                {n === cur ? ring : null}
-              </Pressable>
-            );
-          }
-          const i = u.idx[0], on = sel.includes(i);
-          return (
-            <Pressable key={i} disabled={select && grouped.has(i)} onPress={() => (select ? onToggle(i) : onOpen([i]))} delayLongPress={350} onLongPress={(e) => !select && onLong(u, e.nativeEvent.pageX, e.nativeEvent.pageY)} onPressOut={onRelease} style={{ width: tile, height: tile, opacity: dim }}>
-              <Image source={src(photos[i])} contentFit="cover" style={{ width: tile, height: tile, borderRadius: r }} />
-              <Badge text={String(i + 1)} mid={tile > 90} />
-              {on || n === cur ? ring : null}
-              {on ? <View style={[g.check, { backgroundColor: t.ink }]}><Svg width={16} height={16} viewBox="0 0 16 16"><Path d="M4.5 8.2l2.3 2.3 4.7-4.9" stroke={t.b} strokeWidth={1.8} fill="none" strokeLinecap="round" strokeLinejoin="round" /></Svg></View> : null}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </View>
+    <GestureDetector gesture={gesture}>
+      <View style={{ width: tile, height: tile, opacity: select && locked ? 0.4 : used ? 0.55 : 1 }}>
+        {group ? <Stack pics={u.idx.map((i) => photos[i])} size={tile} r={r} />
+          : <Image source={src(photos[u.idx[0]])} contentFit="cover" style={{ width: tile, height: tile, borderRadius: r }} />}
+        <Badge text={label(u)} mid={tile > 90} />
+        {picked ? ring : null}
+        {picked ? <View style={[g.check, { backgroundColor: t.ink }]}><Svg width={16} height={16} viewBox="0 0 16 16"><Path d="M4.5 8.2l2.3 2.3 4.7-4.9" stroke={t.b} strokeWidth={1.8} fill="none" strokeLinecap="round" strokeLinejoin="round" /></Svg></View>
+          : used && !select ? <View style={[g.check, { backgroundColor: t.ink, opacity: 0.8 }]}><Svg width={16} height={16} viewBox="0 0 16 16"><Path d="M4.5 8.2l2.3 2.3 4.7-4.9" stroke={t.b} strokeWidth={1.8} fill="none" strokeLinecap="round" strokeLinejoin="round" /></Svg></View> : null}
+      </View>
+    </GestureDetector>
   );
 }
 

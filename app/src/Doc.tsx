@@ -9,7 +9,6 @@ import { AudioPlayer, createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { hyphenateSync } from 'hyphen/en';
 import { CN, Metric, SERIF } from './metrics';
-import { Mosaic } from './Photos';
 import { Pic, Placed, Pos, Said, Sticker } from './session';
 import { stickerSrc } from './stickers';
 import { OUTLINES } from './outlines';
@@ -136,13 +135,17 @@ function cuts(word: string): number[] {
 /* a sticker the words go around: the points of its outline, turned as it is, x across the page and y down from the top
    of the paragraph it is tied to; it changes only the lines of that paragraph and the ones after it */
 type Float = { p: number; pts: { x: number; y: number }[] };
-function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number, heads: number[] = [], indent = 0, floats: Float[] = []) {
+function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number, heads: number[] = [], indent = 0, floats: Float[] = [], rowsAt: number[] = []) {
   const e = PAD - (lh - size) / 2;                // how far a photo's edge sits inside its first and last line
   const minSeg = size * 4;                        // a gap beside a photo narrower than this stays empty
   const lines: Line[] = [], starts: number[] = [], rows: number[] = [], tops: number[] = [];
+  /* bottoms: where each paragraph's words and photos end; rowTops: where the photos between a paragraph and the one
+     before it start (rowsAt: how much room they take, the gap after them included) */
+  const bottoms: number[] = [], rowTops: number[] = [];
   const rects: Record<string, Rect> = {};
   let y = 0;
   paras.forEach((para, pi) => {
+    rowTops[pi] = y; y += rowsAt[pi] ?? 0;
     tops.push(y);
     const start = y + (heads[pi] ?? 0);
     starts.push(start);
@@ -216,9 +219,12 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
     }
     if (lines.length > first) lines[lines.length - 1].last = true;
     rows.push(Math.round((ly - start) / lh));
-    y = Math.max(ly, ...own.map((o) => o.y1)) + gap;
+    const bottom = Math.max(ly, ...own.map((o) => o.y1));
+    bottoms.push(bottom);
+    y = bottom + gap;
   });
-  return { lines, starts, rows, rects, tops, height: Math.max(0, y - gap) };
+  rowTops[paras.length] = y; y += rowsAt[paras.length] ?? 0;
+  return { lines, starts, rows, rects, tops, bottoms, rowTops, height: Math.max(0, y - gap) };
 }
 
 /* a photo let go with its top-left at (x, y): the paragraph its top falls in, the nearest line, and the whole number
@@ -249,7 +255,7 @@ const turned = (t: Two) => {
 };
 
 /* a group of photos that fills whatever size its tile has, so it can grow and shrink smoothly */
-function Fluid({ pics }: { pics: Pic[] }) {
+export function Fluid({ pics }: { pics: Pic[] }) {
   const t = useT();
   const four = pics.length >= 4, list = pics.slice(0, four ? 4 : 2);
   const cell = (p: Pic, i: number) => <Image key={i} source={src(p)} contentFit="cover" style={{ flex: 1 }} />;
@@ -259,6 +265,48 @@ function Fluid({ pics }: { pics: Pic[] }) {
         : <View style={{ flex: 1, flexDirection: 'row', gap: 2 }}>{list.map(cell)}</View>}
     </View>
   );
+}
+
+/* The shapes a photo is shown in, as height over width: 16:9 and 3:4 across or upright, and square. A photo is shown in
+   the shape nearest its own (an upright photo in 3:4 upright, a wide one in 3:4 across), cut to fit; cropping in the
+   editor gives it exactly the shape chosen there. */
+export const SHAPES = [9 / 16, 3 / 4, 1, 4 / 3, 16 / 9];
+export function shapeOf(r?: number) {
+  if (!r || !Number.isFinite(r)) return 3 / 4;
+  let best = SHAPES[0], d = Infinity;
+  for (const s of SHAPES) { const dd = Math.abs(Math.log(r / s)); if (dd < d) { d = dd; best = s; } }
+  return best;
+}
+/* how big a single photo is beside the words: about the same area whatever its shape */
+export const soloFor = (r: number, w: number): Rect => {
+  const ww = Math.round(Math.max(0.3 * w, Math.min(0.56 * w, Math.sqrt((0.1587 * w * w) / r))));
+  return { x: 0, y: 0, w: ww, h: Math.round(ww * r) };
+};
+
+/* Photos between two paragraphs sit in rows of up to three, each row as wide as the page: the photos keep their shapes
+   and share one height. */
+const GT = 6;
+function rowOf(rs: number[], W: number) {
+  const sum = rs.reduce((a, r) => a + 1 / r, 0);
+  const h = Math.min(Math.round((W - GT * (rs.length - 1)) / sum), Math.round(Math.min(340, W * 1.1)));
+  const ws = rs.map((r) => Math.round(h / r));
+  const total = ws.reduce((a, b) => a + b, 0) + GT * (rs.length - 1);
+  return { h, ws, x0: Math.round((W - total) / 2) };
+}
+/* the gap between two paragraphs a photo's middle is over (0 before the first, the count after the last), or -1 when it
+   is over the words: a little into the words on either side counts, so a photo is easy to put between them */
+function boundaryAt(base: { tops: number[]; bottoms: number[] }, cy: number, near = 14): number {
+  const P = base.bottoms.length;
+  let best = -1, bd = Infinity;
+  for (let b = 0; b <= P; b++) {
+    const lo = b === 0 ? -Infinity : base.bottoms[b - 1] - near;
+    const hi = b === P ? Infinity : base.tops[b] + 4;
+    if (cy < lo || cy > hi) continue;
+    const mid = ((b === 0 ? (base.tops[0] ?? 0) - 20 : base.bottoms[b - 1]) + (b === P ? (base.bottoms[P - 1] ?? 0) + 20 : base.tops[b])) / 2;
+    const dd = Math.abs(cy - mid);
+    if (dd < bd) { bd = dd; best = b; }
+  }
+  return best;
 }
 
 /* one photo (or group) on the page: one finger drags it anywhere, two make it bigger or smaller (from its top-left
@@ -563,16 +611,19 @@ function cluster(n: number, w: number): Rect[] {
   return [0, 1, 2, 3].map((i) => ({ x: (i % 2) * (a + G), y: Math.floor(i / 2) * (a + G), w: a, h: a }));
 }
 
-/* a photo dragged onto the page from the tray is the size of a single photo */
-export const solo = (w: number) => cluster(1, w)[0];
-
 /* After Lay out: the words and photos set as a page, dense like a printed page. The photos from one recording sit
    together beside its paragraph; photos dragged in from the tray sit where they were dropped. Lines are justified, so
    English lines up at both edges like Chinese. Drag any photo and the paragraphs reflow around it; where it ends up
    is kept. A photo carried in from the tray (preview) moves the words before it is let go. Tap a word to edit it. */
 type Src = { item: number; part: number; from: number };          // which recording, or which photo's caption, a stretch of a paragraph is
-export function Page({ items, photos, placed, moved, preview, voice, indent, onRename, ownTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
-  items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; preview?: { pics: Pic[]; x: number; y: number } | null;
+/* what the page offers the screen for a photo carried in from the bottom of the page */
+export type PageApi = {
+  carry: (c: { x: number; y: number; w: number; h: number } | null, lift?: number[]) => void;   // top-left and size over the page, or null when it is gone; lift: the photos carried, which leave their place on the page meanwhile
+  landing: () => { at: Pos; rect: Rect } | null;                                // where it would land: the place to keep, and its rectangle on the page
+};
+export function Page({ items, photos, placed, moved, api, voice, indent, onRename, ownTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
+  items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>;
+  api?: React.MutableRefObject<PageApi | null>;                  // for a photo carried in from the bottom: where it is over the page, and where it would land
   voice?: boolean;                                                // voice bars at the top left of what was said (a setting)
   indent?: boolean;                                               // first-line indent (a setting)
   onRename?: (text: string) => void; ownTitle?: string;          // the title is renamed right where it is (empty: the date again)
@@ -598,7 +649,7 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onR
   const W = Dimensions.get('window').width - 2 * SZ.px;     // the page is today itself: no card, the full width
   const size = zh ? 14 : 15, lh = zh ? 21 : 19.5, gap = 17;
   const m = zh ? CN : SERIF;
-  const run = (spots: Spot[]) => flow(paras, spots, W, m, size, lh, gap, heads, indent ? (zh ? size * 2 : adv(m, size, 'nnnn')) : 0, floats);
+  const run = (spots: Spot[], rowsAt: number[] = []) => flow(paras, spots, W, m, size, lh, gap, heads, indent ? (zh ? size * 2 : adv(m, size, 'nnnn')) : 0, floats, rowsAt);
 
   /* one paragraph per recording; a recording about photos brings its photos (a group counts as one tile) */
   const paras: string[] = [];
@@ -661,46 +712,113 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onR
     const idx = m ? (x?.kind === 'photos' ? x.parts[+m[2]]?.unit.idx ?? [] : []) : pl?.find((p) => p.id === key)?.idx ?? [];
     if (idx.length) go?.(idx);
   }, []);
-  const blocks: { spot: Spot; ch: number; tiles: { key: string; pics: Pic[]; r: Rect }[] }[] = [];
-  const singles: { key: string; pics: Pic[]; w: number; h: number; at: Pos }[] = [];
-  const below: Record<number, number> = {};
-  sets.forEach((st, n) => {
-    const all = cluster(st.tiles.length, W);
-    st.tiles.forEach((tl, i) => { const at = pos[tl.key]; if (at) singles.push({ key: tl.key, pics: tl.pics, w: at.w ?? all[i].w, h: all[i].h * (at.w ?? all[i].w) / all[i].w, at }); });
-    const stay = st.tiles.filter((tl) => !pos[tl.key]);
-    if (!stay.length) return;
-    const ratio = Math.min(1.5, Math.max(0.6, st.tiles[0].pics[0]?.r ?? 1.33));
-    const pw = Math.round(W * (st.paper === 'only' ? 0.78 : 0.42));
-    const shape = st.paper && stay.length === 1 ? [{ x: 0, y: 0, w: pw, h: Math.round(pw * ratio) }] : cluster(stay.length, W);
-    const cw = Math.max(...shape.map((r) => r.x + r.w)), ch = Math.max(...shape.map((r) => r.y + r.h));
-    const k = below[st.para] ?? 0, rowsN = linesFor(ch);
-    below[st.para] = k + rowsN;
-    const bx = st.paper === 'only' ? Math.round((W - cw) / 2) : n % 2 ? 0 : W - cw;
-    blocks.push({ spot: { key: `set${n}`, x: bx, w: cw, p: st.para, k, n: rowsN }, ch, tiles: stay.map((tl, i) => ({ ...tl, r: shape[i] })) });
-  });
-  const one = solo(W);
-  for (const pl of placed ?? []) {
-    const pics = pl.idx.map((k) => photos[k]).filter(Boolean);
-    const at = pos[pl.id] ?? { x: 0, y: 0 };
-    if (pics.length) singles.push({ key: pl.id, pics, w: at.w ?? one.w, h: one.h * (at.w ?? one.w) / one.w, at });
-  }
+  type Tile = { key: string; pics: Pic[]; ratio: number };
+  const [pv, setPv] = useState<{ r: number } | null>(null);       // a photo carried over the page from the bottom: its shape
+  const [away, setAway] = useState<number | null>(null);         // ... and, when it was already on the page, its number: it is lifted off its old place
+  const ratioOf = (pics: Pic[]) => (pics.length > 1 ? 1 : shapeOf(pics[0]?.r));
+  /* Where every photo goes: by default each recording's photos beside its paragraph; a photo that was moved beside the
+     paragraph and line it was put at, or in a row between two paragraphs. skip: leave one out (the one held). */
+  const assemble = (skip?: string) => {
+    const blocks: { spot: Spot; ch: number; tiles: { key: string; pics: Pic[]; r: Rect }[] }[] = [];
+    const singles: { key: string; pics: Pic[]; w: number; h: number; at: Pos }[] = [];
+    const betw = new Map<number, (Tile & { o: number })[]>();
+    const below: Record<number, number> = {};
+    const putBetween = (tl: Tile, at: Pos) => {
+      const b = Math.max(0, Math.min(at.b ?? 0, paras.length));
+      if (!betw.has(b)) betw.set(b, []);
+      betw.get(b)!.push({ ...tl, o: at.o ?? 0 });
+    };
+    const single = (tl: Tile, at: Pos) => {
+      const w = at.w ?? soloFor(tl.ratio, W).w;
+      singles.push({ key: tl.key, pics: tl.pics, w, h: w * tl.ratio, at });
+    };
+    sets.forEach((st, n) => {
+      const stay: Tile[] = [];
+      for (const tl of st.tiles) {
+        if (tl.key === skip || (away !== null && tl.pics[0] === photos[away])) continue;
+        const at = pos[tl.key];
+        const tile = { key: tl.key, pics: tl.pics, ratio: ratioOf(tl.pics) };
+        if (!at) stay.push(tile); else if (at.b !== undefined) putBetween(tile, at); else single(tile, at);
+      }
+      if (!stay.length) return;
+      let shape: Rect[];
+      if (st.paper && stay.length === 1) {
+        const ratio = Math.min(1.5, Math.max(0.6, stay[0].pics[0]?.r ?? 1.33));     // a page of handwriting keeps its own shape
+        const pw = Math.round(W * (st.paper === 'only' ? 0.78 : 0.42));
+        shape = [{ x: 0, y: 0, w: pw, h: Math.round(pw * ratio) }];
+      } else if (stay.length === 1) {
+        const sz = soloFor(stay[0].ratio, W);
+        shape = [{ x: 0, y: 0, w: sz.w, h: sz.h }];
+      } else shape = cluster(stay.length, W);
+      const cw = Math.max(...shape.map((r) => r.x + r.w)), ch = Math.max(...shape.map((r) => r.y + r.h));
+      const k = below[st.para] ?? 0, rowsN = linesFor(ch);
+      below[st.para] = k + rowsN;
+      const bx = st.paper === 'only' ? Math.round((W - cw) / 2) : n % 2 ? 0 : W - cw;
+      blocks.push({ spot: { key: `set${n}`, x: bx, w: cw, p: st.para, k, n: rowsN }, ch, tiles: stay.map((tl, i) => ({ key: tl.key, pics: tl.pics, r: shape[i] })) });
+    });
+    for (const pl of placed ?? []) {
+      if (pl.id === skip || pl.idx[0] === away) continue;
+      const pics = pl.idx.map((k) => photos[k]).filter(Boolean);
+      if (!pics.length) continue;
+      const at = pos[pl.id] ?? { x: 0, y: 0 };
+      const tile = { key: pl.id, pics, ratio: ratioOf(pics) };
+      if (at.b !== undefined) putBetween(tile, at); else single(tile, at);
+    }
+    const pa = skip === 'preview' ? undefined : pos.preview;
+    if (pv && pa) {
+      const tile = { key: 'preview', pics: [] as Pic[], ratio: pv.r };
+      if (pa.b !== undefined) putBetween(tile, pa); else single(tile, pa);
+    }
+    /* the rows between paragraphs: up to three photos to a row, in their order */
+    const brow = new Map<number, { items: (Tile & { o: number })[]; h: number; ws: number[]; x0: number }[]>();
+    const rowsAt: number[] = Array(paras.length + 1).fill(0);
+    for (const [b, list] of betw) {
+      list.sort((a, c) => a.o - c.o);
+      const rs = [];
+      for (let i = 0; i < list.length; i += 3) { const items = list.slice(i, i + 3); rs.push({ items, ...rowOf(items.map((x) => x.ratio), W) }); }
+      brow.set(b, rs);
+      rowsAt[b] = rs.reduce((a, r) => a + r.h, 0) + GT * (rs.length - 1) + gap;
+    }
+    return { blocks, singles, brow, rowsAt };
+  };
+  type Assembled = ReturnType<typeof assemble>;
+  /* where the rows' photos are, once the paragraphs are laid out (rowTops: where each gap's rows start) */
+  const betweenRects = (a: Assembled, rowTops: number[]) => {
+    const out: Record<string, Rect> = {};
+    for (const [b, rs] of a.brow) {
+      let yy = rowTops[b] ?? 0;
+      for (const r of rs) {
+        let xx = r.x0;
+        r.items.forEach((it, i) => { out[it.key] = { x: xx, y: yy, w: r.ws[i], h: r.h }; xx += r.ws[i] + GT; });
+        yy += r.h + GT;
+      }
+    }
+    return out;
+  };
+  const A = assemble();
+  const { blocks, singles } = A;
   /* photos placed by hand: where they were put, in paragraph and line; one saved as a plain position (an older
-     version, or just dropped from the tray) is placed against the page without the hand-placed photos */
+     version) is placed against the page without the hand-placed photos */
   const base = run(blocks.map((b) => b.spot));
   const lastP = Math.max(0, paras.length - 1);
   const fresh: [string, Pos][] = [];
-  const spots = [...blocks.map((b) => b.spot), ...singles.map((sg) => {
+  const spotOf = (sg: { key: string; w: number; h: number; at: Pos }, collect?: [string, Pos][]): Spot => {
     if (sg.at.p !== undefined && sg.at.k !== undefined) return { key: sg.key, x: Math.min(sg.at.x, W - sg.w), w: sg.w, p: Math.min(sg.at.p, lastP), k: sg.at.k, n: linesFor(sg.h) };
     const sp = toSpot(sg.key, sg.at.x, sg.at.y, sg.w, sg.h, base, W, lh, size);
-    fresh.push([sg.key, { ...sg.at, x: sp.x, p: sp.p, k: sp.k }]);
+    collect?.push([sg.key, { ...sg.at, x: sp.x, p: sp.p, k: sp.k }]);
     return sp;
-  })];
-  const ghost = preview ? toSpot('preview', preview.x, preview.y, one.w, one.h, base, W, lh, size) : null;
-  const { lines, rects, tops, starts, height } = run(ghost ? [...spots, ghost] : spots);
-  /* where a finger is on the page is turned into a paragraph and line against the page as it stands, with every photo
-     in its place except the one being held. (Measured against the page without the photos that had been moved, the
-     paragraphs below a moved photo started too high, so a photo there landed lines away from the finger.) */
-  const others = front ? run(spots.filter((sp) => sp.key !== front)) : { lines, rects, tops, starts, rows: run(spots).rows, height };
+  };
+  const spots = [...blocks.map((b) => b.spot), ...singles.map((sg) => spotOf(sg, fresh))];
+  const { lines, rects, tops, starts, rows: lineRows, bottoms, rowTops, height } = run(spots, A.rowsAt);
+  const brects = betweenRects(A, rowTops);
+  /* where a finger is on the page is turned into a paragraph and line, or a gap between paragraphs, against the page as
+     it stands with every photo in its place except the one being held. (Measured against the page without the photos
+     that had been moved, the paragraphs below a moved photo started too high, so a photo there landed lines away.) */
+  const B = front ? assemble(front) : A;
+  const others = front
+    ? run([...B.blocks.map((b) => b.spot), ...B.singles.map((sg) => spotOf(sg))], B.rowsAt)
+    : { lines, rects, tops, starts, rows: lineRows, bottoms, rowTops, height };
+  const obrects = front ? betweenRects(B, others.rowTops) : brects;
   const [naming, setNaming] = useState<string | null>(null);   // the title being renamed, in place
   const [lifted, setLifted] = useState<number | null>(null);   // the paragraph held up by a long press
   const [aimAt, setAimAt] = useState<number | null>(null);     // the paragraph it would join if let go now
@@ -709,16 +827,25 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onR
     const r = rects[b.spot.key], sy = r.h / b.ch;
     for (const tl of b.tiles) tiles.push({ key: tl.key, pics: tl.pics, r: { x: r.x + tl.r.x, y: r.y + tl.r.y * sy, w: tl.r.w, h: tl.r.h * sy } });
   }
-  for (const sg of singles) tiles.push({ key: sg.key, pics: sg.pics, r: rects[sg.key] });
+  for (const sg of singles) if (sg.key !== 'preview') tiles.push({ key: sg.key, pics: sg.pics, r: rects[sg.key] });
+  for (const rs of A.brow.values()) for (const r of rs) for (const it of r.items) if (it.key !== 'preview') tiles.push({ key: it.key, pics: it.pics, r: brects[it.key] });
+  const previewRect = rects.preview ?? brects.preview;
 
   /* where each photo was when the finger went down; read only inside the gesture handlers */
-  const now = useRef({ rects: {} as Record<string, Rect>, base, sizes: {} as Record<string, { w: number; h: number }> });
+  type Round = { rects: Record<string, Rect>; base: typeof others; sizes: Record<string, { w: number; h: number }>;
+    brow: Assembled['brow']; brects: Record<string, Rect>; between: Record<string, boolean> };
+  const now = useRef<Round>({ rects: {}, base: others, sizes: {}, brow: A.brow, brects: {}, between: {} });
   const last = useRef<{ id: string; at: Pos } | null>(null);
   const moveTo = useRef(onMove);
   useEffect(() => {
+    const sizes: Record<string, { w: number; h: number }> = {};
+    for (const sg of singles) sizes[sg.key] = { w: sg.w, h: sg.h };
+    for (const tl of tiles) sizes[tl.key] = { w: tl.r.w, h: tl.r.h };
+    const between: Record<string, boolean> = {};
+    for (const rs of A.brow.values()) for (const r of rs) for (const it of r.items) between[it.key] = true;
     now.current = {
-      rects: Object.fromEntries(tiles.map((tl) => [tl.key, tl.r])), base: others,
-      sizes: Object.fromEntries([...singles.map((sg) => [sg.key, { w: sg.w, h: sg.h }]), ...blocks.flatMap((b) => b.tiles.map((tl) => [tl.key, { w: tl.r.w, h: tl.r.h }]))]),
+      rects: { ...Object.fromEntries(tiles.map((tl) => [tl.key, tl.r])), ...(previewRect ? { preview: previewRect } : {}) },
+      base: others, sizes, brow: B.brow, brects: obrects, between,
     };
     moveTo.current = onMove;
   });
@@ -727,38 +854,74 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onR
   useEffect(() => { for (const [k, at] of JSON.parse(freshKey) as [string, Pos][]) moveTo.current(k, at); }, [freshKey]);
   const tied = useRef({ tops, starts, height, stickers });
   useEffect(() => { tied.current = { tops, starts, height, stickers }; });
-  /* the photo under the finger: its size on the page when it was picked up */
-  const held = useRef({ w: 0, h: 0 });
+  /* the photo under the finger: its size on the page when it was picked up, and whether it came from a row between paragraphs */
+  const held = useRef({ w: 0, h: 0, from: false });
   /* the words reflow only when the photo's place really changes (its paragraph, line, or some points across), at most once a frame */
   const shown = useRef('');
-  /* While a photo is held the words make room for it as it goes, in real time: each time its place changes (a line,
-     or a side) the page reflows on the next frame, and a thin outline marks the place. Only the lines that move are
-     redrawn, and photos and stickers whose place didn't change aren't touched, so this keeps up with the finger. */
+  /* While a photo is held the words make room for it as it goes, in real time: each time its place changes (a line, a
+     side, or a gap between paragraphs) the page reflows on the next frame. Only the lines that move are redrawn, and
+     photos and stickers whose place didn't change aren't touched, so this keeps up with the finger. */
   const frame = useRef(0);
-  const place = useCallback((id: string, at: Pos, h: number) => {
+  const place = useCallback((id: string, at: Pos) => {
     last.current = { id, at };
-    const sig = `${id}|${at.p}|${at.k}|${at.x}|${at.w}`;
+    const sig = `${id}|${at.p}|${at.k}|${at.x}|${at.w}|${at.b}|${at.o}`;
     if (sig === shown.current) return;
     shown.current = sig;
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => setLive((s) => ({ ...s, [id]: at })));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lh, e]);
+  }, []);
   const grab = useCallback((id: string) => {
-    held.current = now.current.sizes[id] ?? { w: 0, h: 0 };
+    const sz = now.current.sizes[id] ?? { w: 0, h: 0 };
+    held.current = { ...sz, from: !!now.current.between[id] };
     shown.current = ''; last.current = null;
     setPicked(null); setFront(id); setHolding(id);
   }, []);
   const q = (v: number) => Math.round(v / 6) * 6;  // positions kept in steps of 6 points, so the words don't reflow for every pixel
-  /* where the held photo is now (its top-left and width, from the gesture): the place the words make for it */
+  /* A photo held at (x, y) with this size: over the words it goes beside them, at the paragraph and line its top is on;
+     over the gap between two paragraphs (a little into the words on either side counts) it goes in the row there, among
+     the photos already there, at the place its middle is over. */
+  const decide = useCallback((id: string, x: number, y: number, w: number, h: number) => {
+    const nw = now.current;
+    const cx = x + w / 2, cy = y + h / 2;
+    const b = boundaryAt(nw.base, cy);
+    if (b >= 0) {
+      const rs = nw.brow.get(b) ?? [];
+      const list = rs.flatMap((r) => r.items).filter((it) => it.key !== id);
+      let at = 0, ri = 0;
+      for (; ri < rs.length; ri++) { const rr = nw.brects[rs[ri].items[0]?.key]; if (rr && cy < rr.y + rr.h + 3) break; }
+      ri = Math.min(ri, Math.max(0, rs.length - 1));
+      if (rs[ri]) { at = ri * 3; for (const it of rs[ri].items) { const r2 = nw.brects[it.key]; if (it.key !== id && r2 && cx > r2.x + r2.w / 2) at++; } }
+      at = Math.min(at, list.length);
+      const prev = list[at - 1]?.o, next = list[at]?.o;
+      const o = prev === undefined && next === undefined ? 0 : prev === undefined ? next! - 1 : next === undefined ? prev + 1 : (prev + next) / 2;
+      place(id, { x: 0, y: 0, b, o });
+      return;
+    }
+    const sp = toSpot(id, x, y, w, h, nw.base, W, lh, size);
+    /* not on top of another photo: it goes just below the one it would cover, or just above it when the finger is nearer
+       its top (and there is room above in the paragraph) */
+    const e = PAD - (lh - size) / 2, hh = sp.n * lh - 2 * e, st = nw.base.starts[sp.p] ?? 0;
+    const taken = Object.entries(nw.base.rects).filter(([key]) => key !== id && key !== 'preview').map(([, r]) => r);
+    let k = sp.k;
+    for (let pass = 0; pass < 4; pass++) {
+      const y0 = st + k * lh + e;
+      const hit = taken.find((r) => sp.x < r.x + r.w + PAD && sp.x + sp.w + PAD > r.x && y0 < r.y + r.h + PAD && y0 + hh + PAD > r.y);
+      if (!hit) break;
+      const above = Math.floor((hit.y - PAD - hh - e - st) / lh);
+      k = cy < hit.y + hit.h / 2 && above >= 0 ? above : Math.ceil((hit.y + hit.h + PAD - e - st) / lh);
+    }
+    /* the words go around the photo where the finger has it (in steps of a few points), so photo and words are one layer */
+    place(id, { x: q(sp.x), y, p: sp.p, k, w });
+  }, [W, lh, size, place]);
+  /* where the held photo is now (its top-left and width, from the gesture) */
   const move = useCallback((id: string, x: number, y: number, w: number) => {
     const hd = held.current;
     const same = !hd.w || Math.abs(w - hd.w) < 0.5;
-    const ww = same ? hd.w || w : q(w), h = hd.w ? hd.h * ww / hd.w : ww * 0.75;
-    const sp = toSpot(id, x, y, ww, h, now.current.base, W, lh, size);
-    /* the words go around the photo where the finger has it (in steps of a few points), so photo and words are one layer */
-    place(id, { x: q(sp.x), y, p: sp.p, k: sp.k, w: ww }, h);
-  }, [W, lh, size, place]);
+    let ww = same ? hd.w || w : q(w);
+    if (same && hd.from && hd.w) ww = soloFor(hd.h / hd.w, W).w;     // from a row between paragraphs: beside the words at the usual size
+    const h = hd.w ? hd.h * ww / hd.w : ww * 0.75;
+    decide(id, x, y, ww, h);
+  }, [W, decide]);
   const drop = useCallback(() => {
     cancelAnimationFrame(frame.current);
     setHolding(null);
@@ -766,6 +929,29 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onR
     if (lt) { setLive((s) => ({ ...s, [lt.id]: lt.at })); moveTo.current(lt.id, lt.at); }
     last.current = null;
   }, []);
+  /* A photo carried in from the bottom of the page: it is held over the page by the screen (so it follows the finger
+     smoothly) and tells the page where it is (top-left, size); the page makes room, and says where it would land. */
+  const carry = useCallback((c: { x: number; y: number; w: number; h: number } | null, lift?: number[]) => {
+    if (!c) {
+      cancelAnimationFrame(frame.current);
+      shown.current = ''; last.current = null;
+      setPv(null); setAway(null);
+      setLive((s) => { if (!('preview' in s)) return s; const n = { ...s }; delete n.preview; return n; });
+      setFront((f) => (f === 'preview' ? '' : f));
+      return;
+    }
+    if (!shown.current.startsWith('preview')) { setPv({ r: c.h / c.w }); setAway(lift?.[0] ?? null); setFront('preview'); }
+    decide('preview', c.x, c.y, c.w, c.h);
+  }, [decide]);
+  const landing = useCallback(() => {
+    const lt = last.current, rect = now.current.rects.preview;
+    return lt && lt.id === 'preview' && rect ? { at: lt.at, rect } : null;
+  }, []);
+  useEffect(() => {
+    if (!api) return undefined;
+    api.current = { carry, landing };
+    return () => { api.current = null; };
+  }, [api, carry, landing]);
 
   /* a sticker let go (or just put on): tied to the paragraph its top is in; null throws it away */
   const stuck = useRef(onSticker);
@@ -940,12 +1126,6 @@ export function Page({ items, photos, placed, moved, preview, voice, indent, onR
               onClose={put} />
           );
         })() : null}
-        {ghost && preview ? (
-          <View pointerEvents="none" style={{ position: 'absolute', left: rects.preview.x, top: rects.preview.y, width: rects.preview.w, height: rects.preview.h, zIndex: 3, opacity: 0.9 }}>
-            {preview.pics.length > 1 ? <Mosaic pics={preview.pics} w={rects.preview.w} h={rects.preview.h} r={8} />
-              : <Image source={src(preview.pics[0])} contentFit="cover" style={{ width: rects.preview.w, height: rects.preview.h, borderRadius: 8 }} />}
-          </View>
-        ) : null}
       </View>
     </View>
   );

@@ -77,19 +77,31 @@ function Placed({ pc, fw, fh, onChange }: { pc: Piece; fw: number; fh: number; o
   );
 }
 
-/* the crop: a frame with four corners to drag, and the frame itself to move; outside it is shaded */
-function CropBox({ r, fw, fh, set }: { r: Box; fw: number; fh: number; set: (r: Box) => void }) {
-  const latest = useRef(r), start = useRef(r), put = useRef(set);
-  useEffect(() => { latest.current = r; put.current = set; });
+/* The crop: a frame with four corners to drag, and the frame itself to move; outside it is shaded. With a shape chosen
+   (tr: height over width in pixels) a corner drags the frame bigger or smaller and the opposite corner stays put. */
+function CropBox({ r, fw, fh, tr, set }: { r: Box; fw: number; fh: number; tr: number | null; set: (r: Box) => void }) {
+  const latest = useRef(r), start = useRef(r), put = useRef(set), held = useRef(tr);
+  useEffect(() => { latest.current = r; put.current = set; held.current = tr; });
   /* eslint-disable react-hooks/refs -- the gestures read the crop only while dragging, never while rendering */
   const gs = useMemo(() => {
     const MIN = 0.12, cl = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
     const make = (k: 'move' | 'tl' | 'tr' | 'bl' | 'br') => Gesture.Pan().runOnJS(true).minDistance(0)
       .onStart(() => { start.current = latest.current; })
       .onUpdate((e) => {
-        const s = start.current, dx = e.translationX / fw, dy = e.translationY / fh;
+        const s = start.current, dx = e.translationX / fw, dy = e.translationY / fh, t = held.current;
         let x0 = s.x, y0 = s.y, x1 = s.x + s.w, y1 = s.y + s.h;
         if (k === 'move') { x0 = cl(s.x + dx, 0, 1 - s.w); y0 = cl(s.y + dy, 0, 1 - s.h); x1 = x0 + s.w; y1 = y0 + s.h; }
+        else if (t !== null) {
+          const left = k === 'tl' || k === 'bl', top = k === 'tl' || k === 'tr';
+          const ax = left ? s.x + s.w : s.x, ay = top ? s.y + s.h : s.y;                        // the corner that stays
+          const cx = (left ? s.x : s.x + s.w) + dx, cy = (top ? s.y : s.y + s.h) + dy;          // where the finger has the other one
+          const want = Math.max(Math.abs(cx - ax) * fw, (Math.abs(cy - ay) * fh) / t);          // how wide that asks for, in pixels
+          const room = Math.min((left ? ax : 1 - ax) * fw, ((top ? ay : 1 - ay) * fh) / t);     // how wide the photo allows
+          const w = Math.min(room, Math.max(MIN * Math.max(fw, fh / t), want)) / fw, h = (w * fw * t) / fh;
+          x0 = left ? ax - w : ax; x1 = x0 + w; y0 = top ? ay - h : ay; y1 = y0 + h;
+          put.current({ x: x0, y: y0, w, h });
+          return;
+        }
         if (k === 'tl' || k === 'bl') x0 = cl(s.x + dx, 0, x1 - MIN);
         if (k === 'tr' || k === 'br') x1 = cl(x1 + dx, x0 + MIN, 1);
         if (k === 'tl' || k === 'tr') y0 = cl(s.y + dy, 0, y1 - MIN);
@@ -164,6 +176,8 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
   const [busy, setBusy] = useState(false);
   const [cut, setCut] = useState<number[] | null>(null);  // the line drawn around something, shown as its cut-out
   const [crop, setCrop] = useState<Box>(WHOLE);
+  const [shape, setShape] = useState<number | null>(null);   // the shape the crop is held to: short side over long (1, 3/4, 9/16), or free
+  const [upright, setUpright] = useState(true);               // upright or across
   const [file, setFile] = useState<string | number | null>(null);
   const pic = pics[at];
   const [ratio, setRatio] = useState(pic?.r ?? 0.75);     // height over width
@@ -175,6 +189,24 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
   const fw = Math.min(width, roomH / ratio), fh = fw * ratio;
   const isCropped = crop.w < 0.995 || crop.h < 0.995;
   const edited = marks.length > 0 || isCropped;
+  /* a crop held to a shape: height over width, as pixels */
+  const tr = shape === null ? null : shape === 1 ? 1 : upright ? 1 / shape : shape;
+  /* the biggest frame of that shape that fits the photo, around the middle of the frame there is now */
+  const fitBox = (t: number): Box => {
+    const wide = t * fw <= fh;
+    const w = (wide ? fw : fh / t) / fw, h = (wide ? fw * t : fh) / fh;
+    const cx = crop.x + crop.w / 2, cy = crop.y + crop.h / 2;
+    return { x: Math.max(0, Math.min(1 - w, cx - w / 2)), y: Math.max(0, Math.min(1 - h, cy - h / 2)), w, h };
+  };
+  const pickShape = (s: number | null) => {
+    setShape(s);
+    if (s !== null) setCrop(fitBox(s === 1 ? 1 : upright ? 1 / s : s));
+  };
+  const turnShape = () => {
+    if (shape === null || shape === 1) return;
+    setUpright(!upright);
+    setCrop(fitBox(upright ? shape : 1 / shape));
+  };
 
   /* looking closer: pinch, drag, double-tap (only while not editing) */
   const zoom = useSharedValue(1), z0 = useSharedValue(1), px = useSharedValue(0), py = useSharedValue(0), p0 = useSharedValue({ x: 0, y: 0 });
@@ -236,11 +268,11 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
       const lw = Math.min(2400, Math.round(cw * PixelRatio.get() * 1.6)) / PixelRatio.get();
       const uri = await shot.captureRef(isCropped ? cropped : frame, { format: 'jpg', quality: 0.92, result: 'tmpfile', width: lw, height: lw * ch / cw });
       onSave(at, uri, ch / cw);
-      setMarks([]); setCrop(WHOLE); setMode('view');
+      setMarks([]); setCrop(WHOLE); setShape(null); setMode('view');
     } catch { /* keep editing */ }
     setBusy(false);
   }
-  const cancel = () => { setMarks([]); setCrop(WHOLE); setCut(null); setMode('view'); };
+  const cancel = () => { setMarks([]); setCrop(WHOLE); setShape(null); setCut(null); setMode('view'); };
 
   const pieces = marks.filter((m): m is Piece => m.kind === 'sticker');
   const strokes = marks.filter((m): m is Stroke => m.kind === 'pen');
@@ -291,7 +323,7 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
         ) : (
           <View>
             {canvas(true, frame)}
-            {mode === 'crop' ? <CropBox r={crop} fw={fw} fh={fh} set={setCrop} /> : null}
+            {mode === 'crop' ? <CropBox r={crop} fw={fw} fh={fh} tr={tr} set={setCrop} /> : null}
           </View>
         )}
         {mode === 'cut' && !cut ? <Text style={v.hint}>{S.cutHint}</Text> : null}
@@ -334,7 +366,16 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
             {tool(S.undoMark, () => setMarks((m) => m.slice(0, -1)))}
           </>
         ) : mode === 'deco' ? tool(S.undoMark, () => setMarks((m) => m.slice(0, -1)))
-          : mode === 'crop' && isCropped ? tool(S.cropReset, () => setCrop(WHOLE))
+          : mode === 'crop' ? (
+            <>
+              {tool(S.cropFree, () => setShape(null), shape === null)}
+              {tool('1:1', () => pickShape(1), shape === 1)}
+              {tool('3:4', () => pickShape(3 / 4), shape === 3 / 4)}
+              {tool('16:9', () => pickShape(9 / 16), shape === 9 / 16)}
+              {shape !== null && shape !== 1 ? tool(upright ? S.cropUp : S.cropAcross, turnShape)
+                : isCropped ? tool(S.cropReset, () => { setCrop(WHOLE); setShape(null); }) : null}
+            </>
+          )
             : mode === 'delete' ? (
               <>
                 <Text style={[v.toolT, { marginRight: 4 }]}>{S.deleteAsk}</Text>
@@ -348,7 +389,7 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
           {tool(S.pen, () => setMode(mode === 'pen' ? 'view' : 'pen'), mode === 'pen')}
           {tool(S.stickers, () => setBox(true), mode === 'deco')}
           {tool(S.cutOut, () => { setCut(null); setMode(mode === 'cut' ? 'view' : 'cut'); }, mode === 'cut')}
-          {tool(S.crop, () => setMode(mode === 'crop' ? 'view' : 'crop'), mode === 'crop')}
+          {tool(S.crop, () => { if (mode !== 'crop') { setShape(null); setUpright(ratio >= 1); } setMode(mode === 'crop' ? 'view' : 'crop'); }, mode === 'crop')}
           {tool(S.del, () => setMode(mode === 'delete' ? 'view' : 'delete'), mode === 'delete')}
         </View>
       )}
