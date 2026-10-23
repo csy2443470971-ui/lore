@@ -175,7 +175,7 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
           return [left[1] - left[0] >= right[1] - right[0] ? left : right];
         });
       }
-      return segs.filter(([s, f]) => f - s >= (near ? size * 7 : minSeg));
+      return segs.filter(([s, f]) => f - s >= (near ? size * 4.5 : minSeg));   // a gap beside a sticker takes words as one beside a photo does
     };
     const tk = tokens(para);
     const at: number[] = [];
