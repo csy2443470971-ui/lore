@@ -55,8 +55,8 @@ const Chars = React.memo(function Chars({ text, x, y, ls, unit, p, o0, ink, tap,
       onLongPress={hold ? () => hold(p) : undefined} style={[ink, { position: 'absolute', left: x, top: y, letterSpacing: ls }]}>{text}</Text>
   );
 });
-const Word = React.memo(function Word({ s, x, y, p, o, ink, tap, hold }: { s: string; x: number; y: number; p: number; o: number; ink: Ink; tap: Tap; hold?: (p: number) => void }) {
-  return <Text numberOfLines={1} onPress={() => tap(p, o)} onLongPress={hold ? () => hold(p) : undefined} style={[ink, { position: 'absolute', left: x, top: y }]}>{s}</Text>;
+const Word = React.memo(function Word({ s, x, y, p, o, ink, lift = 0, tap, hold }: { s: string; x: number; y: number; p: number; o: number; ink: Ink; lift?: number; tap: Tap; hold?: (p: number) => void }) {
+  return <Text numberOfLines={1} onPress={() => tap(p, o)} onLongPress={hold ? () => hold(p) : undefined} style={[ink, { position: 'absolute', left: x, top: y + lift }]}>{s}</Text>;
 });
 
 /* the outline of a sticker as points, turned with it, x across the page and y from the top of its paragraph; a sticker
@@ -108,7 +108,10 @@ const HEADW = 150;                                // the room a paragraph's head
    size. The same words look the same with the app in Chinese or in English. */
 const CJK_ANY = /[⺀-鿿豈-﫿　-〿＀-￯]/;
 export const isCJK = (s: string) => CJK_ANY.test(s);
-export const LATIN = 15 / 14;                     // Newsreader's size over the Chinese face's
+/* Newsreader sits higher in its line than the Chinese face does: set alone on a line, an English word goes down this much
+   so the two share a baseline */
+const LATIN_DROP = 1.5;
+export const LATIN = 14.5 / 14;                   // Newsreader's size over the Chinese face's: a hair larger, so the two read as one size
 /* a stretch of diary text as runs, each in its own face, for a Text whose fontSize is the Chinese size */
 export function mixed(text: string, size: number, cn: string): React.ReactNode[] {
   return (text.match(/[⺀-鿿豈-﫿　-〿＀-￯]+|[^⺀-鿿豈-﫿　-〿＀-￯]+/g) ?? []).map((r, i) => (
@@ -1213,7 +1216,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     return [mark, ...toks.map((tk, j) => {
       const at = x;
       x += tk.full + (j < toks.length - 1 && !NO_START.test(toks[j + 1].s) ? each : 0);
-      return <Word key={`${key}-${j}`} s={tk.s.trimEnd()} x={at} y={l.y} p={l.p} o={tk.o} ink={isCJK(tk.s) ? ink : inkLa} tap={tap} hold={canHold ? press : undefined} />;
+      return <Word key={`${key}-${j}`} s={tk.s.trimEnd()} x={at} y={l.y} p={l.p} o={tk.o} ink={isCJK(tk.s) ? ink : inkLa} lift={isCJK(tk.s) ? 0 : LATIN_DROP} tap={tap} hold={canHold ? press : undefined} />;
     })];
   };
 
