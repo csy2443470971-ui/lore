@@ -44,7 +44,7 @@ const zh = {
   cleaned: (cut: number, kept: string[]) => `去掉了 ${cut} 处填充词${kept.length ? '，留下了' + kept.map((k) => '“' + k.trim() + '”').join('') : ''}`,
   file: '收进今天',
   /* --- new direction --- */
-  hi: (night: boolean): string => night ? '晚上好' : '下午好', ask0: '今天过得\n怎么样？', bubbleMore: '下午说过一段，接着说？', bubbleNone: '说一句也好',
+  hi: (night: boolean): string => night ? '晚上好' : '下午好', ask0: '今天过得怎么样？', bubbleMore: '下午说过一段，接着说？', bubbleNone: '说一句也好',
   photoHow: '按编号说说每张照片就好，比如“一号是……，三到六号是……”，我们会对上号。',
   dragHow: '长按一张照片，拖到页面里：可以放在文字旁边，也可以放在两段之间，一行最多三张。',
   dragHint: '拖动照片，文字会自己让开', discarded: '这段不要了', releaseCancel: '松开手指，这段就不要了',
@@ -166,7 +166,7 @@ const en: typeof zh = {
   cleaned: (cut, kept) => `Removed ${cut} filler word${cut === 1 ? '' : 's'}${kept.length ? ', kept ' + kept.map((k) => '“' + k.trim() + '”').join(' and ') : ''}`,
   file: 'Add to today',
   /* --- new direction --- */
-  hi: (night) => night ? 'Good evening' : 'Good afternoon', ask0: 'How was\nyour day?', bubbleMore: 'You talked this afternoon. Carry on?', bubbleNone: 'Even one sentence is enough',
+  hi: (night) => night ? 'Good evening' : 'Good afternoon', ask0: 'How was your day?', bubbleMore: 'You talked this afternoon. Carry on?', bubbleNone: 'Even one sentence is enough',
   photoHow: 'Just describe each photo by its number, like “Number one is…, three to six are…”. We’ll match them up.',
   dragHow: 'Hold a photo and drag it onto the page: beside the words, or between two paragraphs, up to three in a row.',
   dragHint: 'Drag a photo and the words move out of its way', discarded: 'Discarded', releaseCancel: 'Let go to discard',

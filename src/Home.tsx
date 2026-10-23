@@ -507,17 +507,20 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           {laid > 0 && tray ? <View style={[h.foot, { borderTopColor: t.gray }]}>{tray}</View> : null}
           {/* the rest of the page: a tap anywhere here starts writing */}
           {!recording && !making && !select && !choosing && !carried && typing === null ? (
-            <Pressable onPress={() => setTyping('')} style={{ minHeight: 260 }} accessibilityLabel={S.writeHint} />
-          ) : null}
-          {nothing && typing === null ? (
-            <View style={{ marginTop: 24, gap: 8 }}>
-              <Text style={{ fontSize: 14, color: t.mut, fontFamily: face.body }}>{S.hi(night)}</Text>
-              <Text style={[h.ask, { color: t.ink, fontFamily: face.title }]}>{S.ask0}</Text>
-            </View>
+            <Pressable onPress={() => setTyping('')} style={{ minHeight: nothing ? Dimensions.get('window').height * 0.6 : 260 }} accessibilityLabel={S.writeHint} />
           ) : null}
         </GHScrollView>
         </Animated.View>
       )}
+
+      {/* an empty page: the greeting and the question, one line each, centred, a little above the middle of the screen;
+          a tap there still starts writing */}
+      {nothing && typing === null && !making ? (
+        <View pointerEvents="none" style={[h.empty, { top: Dimensions.get('window').height * 0.36 }]}>
+          <Text style={[h.hi, { color: t.mut, fontFamily: face.body }]}>{S.hi(night)}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={[h.ask, { color: t.ink, fontFamily: face.title }]}>{S.ask0}</Text>
+        </View>
+      ) : null}
 
       {!making ? <LinearGradient colors={[t.b + '00', t.b]} locations={[0, 0.45]} style={[h.fadeOut, { height: listBottom }]} pointerEvents="none" /> : null}
 
@@ -653,7 +656,9 @@ const h = StyleSheet.create({
   titleSm: { fontSize: 18 },
   titleBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   caret: { fontSize: 13, marginTop: 3 },
-  ask: { fontSize: 28, lineHeight: 38 },
+  empty: { position: 'absolute', left: SZ.px, right: SZ.px, alignItems: 'center', gap: 10 },
+  hi: { fontSize: 14, textAlign: 'center' },
+  ask: { fontSize: 28, lineHeight: 38, textAlign: 'center' },
   tx: { fontSize: 16, lineHeight: 28 },
   foot: { marginTop: 28, paddingTop: 22, borderTopWidth: StyleSheet.hairlineWidth },   // the thumbnails sit apart from the diary, under a hairline
   trayHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
