@@ -1,10 +1,10 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SET, stickerSrc } from './stickers';
 import { SZ } from './theme';
-import { useFace, useS, useT } from './ui';
+import { Text, useFace, useS, useT } from './ui';
 
 /* The sticker box: make one from a photo, the ones made before, then Lore's set. A tap puts one on the page. */
 export function StickerBox({ mine, onPick, onMake, onClose }: { mine: string[]; onPick: (s: string) => void; onMake: () => void; onClose: () => void }) {

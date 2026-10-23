@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, Easing, PanResponder, Pressable, StyleSheet, Text, TextProps, View, ViewStyle } from 'react-native';
+import { Animated, Dimensions, Easing, PanResponder, Pressable, StyleSheet, Text as RNText, TextInput as RNTextInput, TextInputProps, TextProps, View, ViewStyle } from 'react-native';
 import Svg, { Circle, Defs, Path, Pattern, RadialGradient, Rect, Stop } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,10 +13,23 @@ export const useLang = () => useContext(LangCtx);
 export const useS = (): Str => STR[useContext(LangCtx)];
 export const EASE = Easing.bezier(0.22, 1, 0.36, 1);
 
-/* Reading face per language: Chinese serif for Chinese, Newsreader for English. */
+/* the Chinese face chosen in Settings (see fonts.ts) */
+export const FontCtx = createContext<{ body: string; title: string }>({ body: F.cn, title: F.cnMed });
+/* Reading face per language: the chosen Chinese face for Chinese, Newsreader for English. */
 export function useFace() {
   const zh = useLang() === 'zh';
-  return { body: zh ? F.cn : F.serif, title: zh ? F.cnMed : F.serif, italic: zh ? F.cn : F.serifIt };
+  const cn = useContext(FontCtx);
+  return { body: zh ? cn.body : F.serif, title: zh ? cn.title : F.serif, italic: zh ? cn.body : F.serifIt };
+}
+/* Every piece of text in the app goes through these, so in Chinese all of it is set in the chosen face (a style that
+   names its own face still wins); in English the interface keeps the system's. */
+export function Text(props: TextProps & { ref?: React.Ref<RNText> }) {
+  const zh = useLang() === 'zh', cn = useContext(FontCtx);
+  return <RNText {...props} style={zh ? [{ fontFamily: cn.body }, props.style] : props.style} />;
+}
+export function TextInput(props: TextInputProps & { ref?: React.Ref<RNTextInput> }) {
+  const zh = useLang() === 'zh', cn = useContext(FontCtx);
+  return <RNTextInput {...props} style={zh ? [{ fontFamily: cn.body }, props.style] : props.style} />;
 }
 
 type IconName = 'camera' | 'cal' | 'gear' | 'layout' | 'mic' | 'book' | 'user' | 'back' | 'down' | 'plus' | 'photo' | 'close' | 'chev' | 'pin' | 'list' | 'settings' | 'up' | 'undo' | 'sticker';

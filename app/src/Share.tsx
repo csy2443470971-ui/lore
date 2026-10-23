@@ -1,10 +1,10 @@
 import React, { useRef, useState } from 'react';
-import { NativeModules, PixelRatio, Platform, Pressable, Share as Sheet, StyleSheet, Text, TurboModuleRegistry, View, useWindowDimensions } from 'react-native';
+import { NativeModules, PixelRatio, Platform, Pressable, Share as Sheet, StyleSheet, TurboModuleRegistry, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Pic } from './session';
 import { F } from './theme';
-import { Round, useLang, useS, useT } from './ui';
+import { Round, Text, useFace, useLang, useS, useT } from './ui';
 
 /* capturing a view needs react-native-view-shot's native side, which only the newly installed app has; an app installed
    before it still runs this same update, without the button doing more than saying so */
@@ -63,7 +63,8 @@ function Card({ fmt, tone, day, title, meta, paras, pics }: { fmt: Fmt; tone: To
   const dp = dateParts(day, S.months, S.weekdays, zh);
   const span = day.startsWith('r-');
   const words = paras.map((p) => (zh ? '　　' + p : p)).join('\n');
-  const body = zh ? { fontFamily: F.cn, fontSize: 14, lineHeight: 25 } : { fontFamily: F.serif, fontSize: 15.5, lineHeight: 23 };
+  const face = useFace();
+  const body = zh ? { fontFamily: face.body, fontSize: 14, lineHeight: 25 } : { fontFamily: F.serif, fontSize: 15.5, lineHeight: 23 };
   /* the photos take what the words leave: the words' lines are estimated, then the photos get the rest, within bounds */
   const inner = CW - 2 * pad, perLine = inner / (zh ? body.fontSize : body.fontSize * 0.47);
   const need = paras.reduce((n, p) => n + Math.ceil(((zh ? 2 : 0) + p.length) / perLine), 0) * body.lineHeight;
@@ -86,7 +87,7 @@ function Card({ fmt, tone, day, title, meta, paras, pics }: { fmt: Fmt; tone: To
         ) : (
           <View style={{ gap: 4 }}>
             <View style={[k.dot, { backgroundColor: c.red }]} />
-            <Text style={[k.spanT, { color: c.ink, fontFamily: zh ? F.cn : F.serif }]}>{title}</Text>
+            <Text style={[k.spanT, { color: c.ink, fontFamily: zh ? face.body : F.serif }]}>{title}</Text>
             {meta ? <Text style={[k.small, { color: c.mut }]}>{meta}</Text> : null}
           </View>
         )}
@@ -98,7 +99,7 @@ function Card({ fmt, tone, day, title, meta, paras, pics }: { fmt: Fmt; tone: To
       </View>
       <View style={[k.foot, { borderTopColor: c.rule }]}>
         <Image source={c.mark} contentFit="contain" style={{ width: 52, height: 14.5 }} />
-        <Text numberOfLines={1} style={[k.slogan, { color: c.mut, fontFamily: zh ? F.cn : F.serifIt }]}>{S.slogan}</Text>
+        <Text numberOfLines={1} style={[k.slogan, { color: c.mut, fontFamily: zh ? face.body : F.serifIt }]}>{S.slogan}</Text>
       </View>
     </View>
   );

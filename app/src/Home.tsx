@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActionSheetIOS, Alert, Animated, Dimensions, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActionSheetIOS, Alert, Animated, Dimensions, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -15,13 +15,13 @@ import { agentOn, Heard, marked, transcribe } from './agent';
 import { Pic, Placed, Pos, Said, Sticker, Unit, unitsOf } from './session';
 import { keepRecording } from './store';
 import { SZ } from './theme';
-import { Glow, Notice, RecState, Round, TalkKey, useFace, useLang, useS, useT, useTimer } from './ui';
+import { Glow, Notice, RecState, Round, TalkKey, Text, TextInput, useFace, useLang, useS, useT, useTimer } from './ui';
 
 type Rect = { x: number; y: number; w: number; h: number };
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRename, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onLayout, onUndo, onMerge, onNotice, stickers, slap, mine, onAddSticker, onSticker, onMakeSticker, onPhoto }: {
+export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRename, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onOffPage, onReorder, onLayout, onUndo, onMerge, onNotice, stickers, slap, mine, onAddSticker, onSticker, onMakeSticker, onPhoto }: {
   hidden: boolean; night: boolean;
   day: string;                                      // which day is shown; switching days keeps this screen and swaps only the page
   past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
@@ -47,6 +47,8 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   onSaved: (s: Said) => void; onLayout: () => void; onNotice: (n: Notice) => void;
   onText: (item: number, part: number, text: string) => void;   // an edited recording, or an edited photo caption (part)
   onPlace: (idx: number[], at: Pos) => void; onMove: (key: string, at: Pos) => void;
+  onOffPage: (key: string) => void;                  // a photo taken off the page (it stays among the thumbnails)
+  onReorder: (item: number, before: number) => void;  // a paragraph moved before another item
 }) {
   const t = useT();
   const S = useS();
@@ -87,7 +89,8 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
     return () => { show.remove(); hide.remove(); };
   }, []);
   const [viewing, setViewing] = useState<{ idx: number[]; at: number; pics?: Pic[]; only?: 'cut' } | null>(null);   // a photo open full screen          // a paragraph opened to select (and copy) its words
-  const [bin, setBin] = useState<'on' | 'over' | null>(null);           // a sticker is being carried: the bin shows in the talk key's place
+  const [bin, setBin] = useState<'on' | 'over' | null>(null);
+  const [binPhoto, setBinPhoto] = useState(false);                     // the bin is for a photo (off the page), not a sticker           // a sticker is being carried: the bin shows in the talk key's place
   const [draft, setDraft] = useState('');
   /* A photo lifted from the thumbnails at the bottom: it is drawn by the screen at the finger (shared values, moved on
      the screen's own thread, so it follows smoothly whatever the page is doing), and tells the page where it is; the page
@@ -134,7 +137,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
 
   const units = unitsOf(photos.length, groups);
   const talked = new Set(said.flatMap((x) => (x.kind === 'photos' ? x.parts.map((p) => p.unit.idx[0]) : [])));
-  const laidIdx = new Set(said.slice(0, laid).flatMap((x) => (x.kind === 'photos' ? x.parts.map((p) => p.unit.idx[0]) : [])));
+  const laidIdx = new Set(said.slice(0, laid).flatMap((x, i) => (x.kind === 'photos' ? x.parts.filter((_, j) => !moved?.[`${i}-${j}`]?.off).map((p) => p.unit.idx[0]) : [])));
   const pending = units.map((u, n) => (talked.has(u.idx[0]) ? -1 : n)).filter((n) => n >= 0);
   const used = new Set([...laidIdx, ...(placed ?? []).map((p) => p.idx[0])]);   // the photos that are on the page
   const showTray = units.some((u) => !used.has(u.idx[0]));                       // some photo is not on the page yet
@@ -256,7 +259,10 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
       const fy = edgeY.current;
       if (fy === null || !scroll.current) return;
       const topEdge = top + 50 + 70, botEdge = Dimensions.get('window').height - 190;
-      const dy = fy < topEdge ? -Math.min(14, (topEdge - fy) / 5) : fy > botEdge ? Math.min(14, (fy - botEdge) / 5) : 0;
+      /* a photo held on the page doesn't scroll it down once the finger nears the bin, where the talk key is */
+      const binY = Dimensions.get('window').height - (ins.bottom + 30) - (SZ.talk + 28) / 2;
+      const down = fy > botEdge && !(pageHold.current && fy > binY - 60);
+      const dy = fy < topEdge ? -Math.min(14, (topEdge - fy) / 5) : down ? Math.min(14, (fy - botEdge) / 5) : 0;
       if (!dy) return;
       const next = Math.max(0, Math.min(Math.max(0, sized.current.content - sized.current.view), scrollY.current + dy));
       const d = next - scrollY.current;
@@ -463,7 +469,8 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
             onMerge={recording ? undefined : onMerge} onShare={(item) => setChoosing(new Set([`t${item}`]))} onSelect={setReading}
             onOpen={(idx) => setViewing({ idx, at: 0 })}
             chosen={choosing ?? undefined} onChoose={choosing ? choose : undefined}
-            stickers={stickers} slap={slap} onSticker={onSticker} bin={binAt} scroll={scroll} onStickerDrag={setBin} /> : null}
+            stickers={stickers} slap={slap} onSticker={onSticker} bin={binAt} scroll={scroll} onStickerDrag={(s) => { setBinPhoto(false); setBin(s); }}
+            onPhotoBin={(s) => { setBinPhoto(true); setBin(s); }} onRemove={onOffPage} onReorder={recording ? undefined : onReorder} /> : null}
 
           {laid === 0 ? tray : null}
 
@@ -579,7 +586,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
 
       {bin ? (
         <View pointerEvents="none" style={[h.bin, { top: binAt.y - 32 - 26, left: W / 2 - 70, width: 140 }]}>
-          <Text style={{ fontSize: 11.5, color: t.mut, marginBottom: 8 }}>{S.binHint}</Text>
+          <Text style={{ fontSize: 11.5, color: t.mut, marginBottom: 8 }}>{binPhoto ? S.binPhoto : S.binHint}</Text>
           <View style={[h.binDot, { backgroundColor: bin === 'over' ? t.red : t.panel, transform: [{ scale: bin === 'over' ? 1.15 : 1 }] }]}>
             <Text style={{ fontSize: 22, color: bin === 'over' ? '#fff' : t.ink }}>×</Text>
           </View>

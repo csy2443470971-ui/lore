@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Dimensions, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Re, { SharedValue, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -14,7 +14,7 @@ import { stickerSrc } from './stickers';
 import { OUTLINES } from './outlines';
 import { fileUri } from './store';
 import { SZ } from './theme';
-import { useFace, useLang, useS, useT } from './ui';
+import { Text, TextInput, useFace, useLang, useS, useT } from './ui';
 
 const src = (p: Pic) => (p.uri ? { uri: p.uri } : p.asset);
 
@@ -368,7 +368,7 @@ function MovableIn({ id, r, slot, z, W, locked, block, grab, move, drop, open, t
   grab: (id: string) => void; drop: () => void;
   /* where it is held: the finger on the page, the point of the photo it holds (as fractions), the width the person gave
      it, and the finger on the screen (-1 when it didn't move) */
-  move: (id: string, gx: number, gy: number, fx: number, fy: number, want: number, sy: number) => void;
+  move: (id: string, gx: number, gy: number, fx: number, fy: number, want: number, sy: number, sx: number) => void;
   open?: (id: string) => void;                     // a tap opens the photo full screen
   children: React.ReactNode;
 }) {
@@ -387,7 +387,7 @@ function MovableIn({ id, r, slot, z, W, locked, block, grab, move, drop, open, t
   useEffect(() => { cb.current = { grab, move, drop, open }; });
   const onOpen = useCallback((k: string) => cb.current.open?.(k), []);
   const onGrab = useCallback((k: string) => cb.current.grab(k), []);
-  const onMove = useCallback((k: string, a: number, b: number, c: number, dd: number, ee: number, ff: number) => cb.current.move(k, a, b, c, dd, ee, ff), []);
+  const onMove = useCallback((k: string, a: number, b: number, c: number, dd: number, ee: number, ff: number, gg: number) => cb.current.move(k, a, b, c, dd, ee, ff, gg), []);
   const onDrop = useCallback(() => cb.current.drop(), []);
   useEffect(() => {
     const to = { x: r.x, y: r.y, w: r.w, h: r.h };
@@ -408,9 +408,9 @@ function MovableIn({ id, r, slot, z, W, locked, block, grab, move, drop, open, t
   }, [r.x, r.y, r.w, r.h, slot, W, home, live, two, sits, px, py, fx, fy, x, y, w, h]);
   /* eslint-disable react-hooks/refs -- the gesture's callbacks run during a gesture, on the UI thread, never while rendering */
   const gesture = useMemo(() => {
-    const report = (sy: number) => {
+    const report = (sy: number, sx = -1) => {
       'worklet';
-      scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), want.get(), sy);
+      scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), want.get(), sy, sx);
     };
     /* each gesture marks itself on when it starts and off when it is over in any way (onFinalize always runs, even when a
        gesture is cancelled), so the photo can never be left thinking it is still held. The first one takes hold of the
@@ -456,7 +456,7 @@ function MovableIn({ id, r, slot, z, W, locked, block, grab, move, drop, open, t
         if (two.get().id === id) two.set({ ...two.get(), x1: e.absoluteX, y1: e.absoluteY });
         if (e.numberOfPointers !== l.n) return;
         px.set(px.get() + e.translationX - l.x); py.set(py.get() + e.translationY - l.y);
-        report(e.absoluteY);
+        report(e.absoluteY, e.absoluteX);
       })
       .onFinalize(() => end(1));
     const pinch = Gesture.Pinch().enabled(!locked)
@@ -477,13 +477,13 @@ function MovableIn({ id, r, slot, z, W, locked, block, grab, move, drop, open, t
     if (!far.get().w) far.set({ w: w.get(), h: h.get() });
     const f = far.get(), nw = Math.max(W * 0.25, Math.min(W, f.w * s));
     want.set(nw); w.set(nw); h.set(f.h * nw / f.w);
-    scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), nw, -1);
+    scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), nw, -1, -1);
   }, [id, W]);
   /* the page scrolled by itself under it: it moves down the page as far, so it stays under the finger */
   useAnimatedReaction(() => shove.get(), (s, prev) => {
     if (!prev || s.n === prev.n || s.id !== id || live.get() === 0) return;
     py.set(py.get() + s.dy);
-    scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), want.get(), -1);
+    scheduleOnRN(onMove, id, px.get(), py.get(), fx.get(), fy.get(), want.get(), -1, -1);
   }, [id]);
   /* eslint-enable react-hooks/refs */
   const style = useAnimatedStyle(() => {
@@ -627,38 +627,44 @@ function StuckIn({ st, top, W, source, slap, locked, bin, block, place, carry, s
   );
 }
 
-/* A paragraph held by a long press: it lifts off the page as a card, and the rest of the page dims. Drag it up onto the
-   paragraph above, or down onto the one below, and let go to join them (the one it would join lights up); or use the
-   small glass bar under it: join above, join below, share, select the words (to copy them). A tap on the dim page puts
-   it back. */
-function Lifted({ text, top, W, ink, up, down, onAim, onUp, onDown, onShare, onSelect, onClose }: {
+/* A paragraph held by a long press: it lifts off the page as a card, and the rest of the page dims. Drag it up or down
+   and a red line shows where it would go between the other paragraphs; let go there and it moves. The small glass bar
+   under it joins it to the paragraph above or below, shares it, or selects its words (to copy them). A tap on the dim
+   page puts it back. */
+function Lifted({ text, top, W, ink, p, gaps, up, down, onSlot, onMove, onUp, onDown, onShare, onSelect, onClose }: {
   text: string; top: number; W: number; ink: Ink; up: boolean; down: boolean;
-  onAim: (a: 0 | 1 | 2) => void; onUp: () => void; onDown: () => void; onShare?: () => void; onSelect?: () => void; onClose: () => void;
+  p: number; gaps: number[];                       // which paragraph it is; where each gap between paragraphs is on the page
+  onSlot: (b: number | null) => void; onMove: (b: number) => void;
+  onUp: () => void; onDown: () => void; onShare?: () => void; onSelect?: () => void; onClose: () => void;
 }) {
   const t = useT();
   const S = useS();
-  const ty = useSharedValue(0), pop = useSharedValue(0.97), aim = useSharedValue(0);
+  const ty = useSharedValue(0), pop = useSharedValue(0.97), slot = useSharedValue(-1), grip = useSharedValue(0);
   useEffect(() => {
     pop.set(withSpring(1.025, { damping: 13, stiffness: 240, mass: 0.6 }));
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
   }, [pop]);
-  const cb = useRef({ onAim, onUp, onDown });
-  useEffect(() => { cb.current = { onAim, onUp, onDown }; });
-  const aimJS = useCallback((a: 0 | 1 | 2) => { if (a) Haptics.selectionAsync().catch(() => {}); cb.current.onAim(a); }, []);
-  const upJS = useCallback(() => cb.current.onUp(), []);
-  const downJS = useCallback(() => cb.current.onDown(), []);
+  const cb = useRef({ onSlot, onMove });
+  useEffect(() => { cb.current = { onSlot, onMove }; });
+  const slotJS = useCallback((b: number) => { if (b >= 0) Haptics.selectionAsync().catch(() => {}); cb.current.onSlot(b >= 0 ? b : null); }, []);
+  const moveJS = useCallback((b: number) => cb.current.onMove(b), []);
   /* eslint-disable react-hooks/refs -- the gesture's callbacks run during a gesture, never while rendering */
   const drag = useMemo(() => Gesture.Pan().minDistance(4)
+    .onStart((e) => { grip.set(e.y); })
     .onUpdate((e) => {
-      ty.set(e.translationY * 0.55);                 // it follows the finger a little reluctantly, like something lifted
-      const a = e.translationY < -44 && up ? 1 : e.translationY > 44 && down ? 2 : 0;
-      if (a !== aim.get()) { aim.set(a); scheduleOnRN(aimJS, a as 0 | 1 | 2); }
+      ty.set(e.translationY);
+      /* the gap nearest the finger; the two around the paragraph itself would leave it where it is */
+      const at = top - 12 + grip.get() + e.translationY;
+      let b = -1, bd = Infinity;
+      gaps.forEach((g, i) => { const dd = Math.abs(g - at); if (dd < bd) { bd = dd; b = i; } });
+      if (b === p || b === p + 1 || bd > 80) b = -1;
+      if (b !== slot.get()) { slot.set(b); scheduleOnRN(slotJS, b); }
     })
     .onEnd(() => {
-      const a = aim.get();
-      if (a === 1) scheduleOnRN(upJS); else if (a === 2) scheduleOnRN(downJS);
+      const b = slot.get();
+      if (b >= 0) scheduleOnRN(moveJS, b);
       else ty.set(withSpring(0, SPRING));
-    }), [up, down, ty, aim, aimJS, upJS, downJS]);
+    }), [top, p, gaps, ty, slot, grip, slotJS, moveJS]);
   /* eslint-enable react-hooks/refs */
   const lifted = useAnimatedStyle(() => ({ transform: [{ translateY: ty.get() }, { scale: pop.get() }] }));
   const btn = (label: string, run: () => void, key: string) => (
@@ -679,6 +685,7 @@ function Lifted({ text, top, W, ink, up, down, onAim, onUp, onDown, onShare, onS
             {[up ? btn(S.joinUp, onUp, 'up') : null, down ? btn(S.joinDown, onDown, 'down') : null,
               onShare ? btn(S.share, onShare, 'share') : null, onSelect ? btn(S.selectText, onSelect, 'select') : null]}
           </View>
+          <Text style={[d.liftHint, { color: t.mut }]}>{S.moveHint}</Text>
         </Re.View>
       </GestureDetector>
     </>
@@ -710,7 +717,7 @@ export type PageApi = {
   landing: () => { at: Pos; rect: Rect } | null;                                // where it would land: the place to keep, and its rectangle on the page
   nudge: (dy: number) => void;                                                  // the page scrolled by itself under a photo held on it
 };
-export function Page({ items, photos, placed, moved, api, onEdge, onPreview, voice, indent, onRename, ownTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
+export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onReorder, onRemove, onPhotoBin, voice, indent, onRename, ownTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
   items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>;
   api?: React.MutableRefObject<PageApi | null>;                  // for a photo carried in from the bottom: where it is over the page, and where it would land
   onEdge?: (y: number | null) => void;                           // a photo held on the page: the finger on the screen (so the page can scroll near the edges), null when let go
@@ -723,6 +730,9 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, voi
   onDrag: (on: boolean) => void; onMove: (key: string, at: Pos) => void; onEdit: (item: number, part: number) => void;
   /* a long press lifts a paragraph: join it to the one above (the item that starts it) or below, share it, or select its words */
   onMerge?: (item: number) => void; onShare?: (item: number) => void; onSelect?: (text: string) => void;
+  onReorder?: (item: number, before: number) => void;            // a paragraph (its item) moved to go before another item (or to the end)
+  onRemove?: (key: string) => void;                              // a photo dropped on the bin: off the page
+  onPhotoBin?: (state: 'on' | 'over' | null) => void;            // a photo is carried (and over the bin), or let go
   onOpen?: (idx: number[]) => void;                              // a tap on a photo (or group): open it full screen
   chosen?: Set<string>;                                          // choosing what to share: these paragraphs ('t<item>') and photos are marked
   onChoose?: (key: string) => void;                              // while choosing, a tap marks a paragraph or photo instead of editing it
@@ -837,6 +847,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, voi
       for (const tl of st.tiles) {
         if (tl.key === skip || (away !== null && tl.pics[0] === photos[away])) continue;
         const at = pos[tl.key];
+        if (at?.off) continue;
         const tile = { key: tl.key, pics: tl.pics, ratio: ratioOf(tl.pics) };
         if (!at) stay.push(tile); else if (at.b !== undefined) putBetween(tile, at); else single(tile, at);
       }
@@ -921,7 +932,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, voi
   const obrects = front ? betweenRects(B, others.rowTops) : brects;
   const [naming, setNaming] = useState<string | null>(null);   // the title being renamed, in place
   const [lifted, setLifted] = useState<number | null>(null);   // the paragraph held up by a long press
-  const [aimAt, setAimAt] = useState<number | null>(null);     // the paragraph it would join if let go now
+  const [slotAt, setSlotAt] = useState<number | null>(null);   // the gap a held paragraph would move to if let go now
   const tiles: { key: string; pics: Pic[]; r: Rect }[] = [];
   for (const b of blocks) {
     const r = rects[b.spot.key], sy = r.h / b.ch;
@@ -958,6 +969,8 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, voi
   /* the photo under the finger: its size on the page when it was picked up, its shape, and whether it came from a row
      between paragraphs */
   const held = useRef({ w: 0, h: 0, r: 0.75, from: false });
+  const binNow = useRef<{ at?: { x: number; y: number }; state: 'on' | 'over' | null; show?: (s: 'on' | 'over' | null) => void; remove?: (key: string) => void }>({ state: null });
+  useEffect(() => { binNow.current.at = bin; binNow.current.show = onPhotoBin; binNow.current.remove = onRemove; });
   const heldId = useRef<string | null>(null);
   const shove = useSharedValue<Shove>({ id: '', dy: 0, n: 0 });
   const edge = useRef(onEdge);
@@ -1025,8 +1038,15 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, voi
   }, [W, lh, size, place]);
   /* where the held photo is now: the finger on the page and the point of the photo it holds. Its size beside the words is
      the one it had there (or two fingers gave it); one taken from a row between paragraphs has the usual size. */
-  const move = useCallback((id: string, gx: number, gy: number, fx: number, fy: number, want: number, sy: number) => {
+  const move = useCallback((id: string, gx: number, gy: number, fx: number, fy: number, want: number, sy: number, sx: number) => {
     const hd = held.current;
+    /* the bin shows where the talk key is while a photo is carried; over it, the photo would come off the page */
+    const bn = binNow.current;
+    if (sx >= 0 && bn.at) {
+      const over = Math.hypot(sx - bn.at.x, sy - bn.at.y) < 56;
+      const st = over ? 'over' : 'on';
+      if (st !== bn.state) { bn.state = st; if (over) Haptics.selectionAsync().catch(() => {}); bn.show?.(st); }
+    }
     const pinched = hd.w > 0 && Math.abs(want - hd.w) >= 0.5;
     const ww = pinched ? Math.round(want) : hd.from || !hd.w ? soloFor(hd.r, W).w : hd.w;
     const hh = ww * hd.r;
@@ -1036,8 +1056,14 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, voi
   const drop = useCallback(() => {
     cancelAnimationFrame(frame.current);
     setHolding(null);
+    const id = heldId.current, bn = binNow.current;
     heldId.current = null;
     edge.current?.(null);
+    if (bn.state) {
+      const off = bn.state === 'over';
+      bn.state = null; bn.show?.(null);
+      if (off && id) { last.current = null; bn.remove?.(id); return; }
+    }
     const lt = last.current;
     if (lt) { setLive((s) => ({ ...s, [lt.id]: lt.at })); moveTo.current(lt.id, lt.at); }
     last.current = null;
@@ -1136,8 +1162,8 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, voi
     const sr = srcs[p].reduce((r, c) => (c.from <= o ? c : r), srcs[p][0]); onEdit(sr.item, sr.part);
   };
   const canLift = !!(onMerge || onShare || onSelect) && !onChoose;
-  const hold = (p: number) => (canLift ? () => { setAimAt(null); setLifted(p); } : undefined);
-  const marked = (p: number) => !!chosen?.has(`t${srcs[p][0].item}`) || p === aimAt;
+  const hold = (p: number) => (canLift ? () => { setSlotAt(null); setLifted(p); } : undefined);
+  const marked = (p: number) => !!chosen?.has(`t${srcs[p][0].item}`);
   const ink = useMemo(() => ({ fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body }), [size, lh, t.ink, face.body]);
   /* the taps reach the latest page through a ref, so the line pieces keep the same handlers and needn't re-render */
   const acts = useRef({ edit, hold });
@@ -1232,18 +1258,36 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, voi
             </Pressable>
           );
           return (
-            <View style={[d.seg, { top: at - 44, left: Math.max(-8, Math.min(W - 176, st.x + st.w / 2 - 88)), backgroundColor: t.panel }]}>
+            <View style={[d.seg, { top: at - 44, left: Math.max(-8, Math.min(W - 236, st.x + st.w / 2 - 118)), backgroundColor: t.panel }]}>
               {seg(!!st.wrap, S.wrapOn, true)}{seg(!st.wrap, S.wrapOff, false)}
+              <Pressable onPress={() => { setPicked(null); onSticker(st.id, null); }} style={d.segBtn}>
+                <Text style={{ fontSize: 12.5, color: t.red }}>{S.del}</Text>
+              </Pressable>
             </View>
           );
         })() : null}
         {holding ? <GestureDetector gesture={second}><View style={d.second} /></GestureDetector> : null}
+        {lifted !== null && slotAt !== null ? (() => {
+          const P = paras.length, b = slotAt;
+          const gy = b === 0 ? (tops[0] ?? 0) - 8 : b === P ? (bottoms[P - 1] ?? 0) + 10 : ((bottoms[b - 1] ?? 0) + (tops[b] ?? 0)) / 2;
+          return <View pointerEvents="none" style={[d.slot, { top: gy - 1, width: W, backgroundColor: t.red }]} />;
+        })() : null}
         {lifted !== null && lifted < paras.length ? (() => {
-          const p = lifted, put = () => { setLifted(null); setAimAt(null); };
+          const p = lifted, put = () => { setLifted(null); setSlotAt(null); };
+          const P = paras.length;
+          const gaps = Array.from({ length: P + 1 }, (_, b) => (b === 0 ? (tops[0] ?? 0) - 8 : b === P ? (bottoms[P - 1] ?? 0) + 10 : ((bottoms[b - 1] ?? 0) + (tops[b] ?? 0)) / 2));
+          /* the item a paragraph moved to gap b goes before: the first item of the paragraph after the gap, with the
+             heading above it (or the end of the page) */
+          const before = (b: number) => {
+            if (b >= P) return items.length;
+            let at = srcs[b][0].item;
+            while (at > 0 && items[at - 1]?.kind === 'head') at--;
+            return at;
+          };
           const first = srcs[p][0].item, next = srcs[p + 1]?.[0].item;
           return (
             <Lifted text={paras[p]} top={starts[p]} W={W} ink={ink} up={p > 0 && !!onMerge} down={next !== undefined && !!onMerge}
-              onAim={(a) => setAimAt(a === 1 ? p - 1 : a === 2 ? p + 1 : null)}
+              p={p} gaps={gaps} onSlot={setSlotAt} onMove={(b) => { put(); onReorder?.(first, before(b)); }}
               onUp={() => { put(); onMerge?.(first); }} onDown={() => { put(); if (next !== undefined) onMerge?.(next); }}
               onShare={onShare ? () => { put(); onShare(first); } : undefined} onSelect={onSelect ? () => { put(); onSelect(paras[p]); } : undefined}
               onClose={put} />
@@ -1300,13 +1344,15 @@ const d = StyleSheet.create({
   head: { position: 'absolute', left: 0, fontSize: 14.5, lineHeight: 20, fontWeight: '600' },
   marker: { position: 'absolute', borderRadius: 3 },
   second: { position: 'absolute', left: -60, right: -60, top: -600, bottom: -900, zIndex: 9 },
-  seg: { position: 'absolute', zIndex: 6, flexDirection: 'row', borderRadius: 17, padding: 3, gap: 2, width: 176, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
+  seg: { position: 'absolute', zIndex: 6, flexDirection: 'row', borderRadius: 17, padding: 3, gap: 2, width: 236, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
   segBtn: { flex: 1, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   dim: { position: 'absolute', left: -40, right: -40, top: -400, bottom: -800, opacity: 0.72, zIndex: 7 },
   lift: { position: 'absolute', left: -12, zIndex: 8, gap: 10 },
   liftCard: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 22, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
   liftBar: { alignSelf: 'center', flexDirection: 'row', borderRadius: 18, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 4 },
   liftBtn: { paddingHorizontal: 12, height: 36, justifyContent: 'center' },
+  liftHint: { fontSize: 11.5, textAlign: 'center' },
+  slot: { position: 'absolute', left: 0, height: 2.5, borderRadius: 1.5, zIndex: 9 },
   /* a sticker's shadow follows its own outline: on the phone from the picture's edge, on the web as a drop-shadow filter */
   stickerShadow: Platform.OS === 'web' ? ({ filter: 'drop-shadow(0 1.5px 2px rgba(0,0,0,0.18))' } as object)
     : { shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2.5, shadowOffset: { width: 0, height: 1.5 } },

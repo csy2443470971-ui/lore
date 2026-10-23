@@ -1,8 +1,8 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SZ } from './theme';
-import { useFace, useT } from './ui';
+import { Text, useFace, useT } from './ui';
 
 /* The menu under the title, in three parts. At the top, the last three days side by side as circles: the day before
    and yesterday by their date alone, today by name; the one open now is filled, and a small red dot marks a day with

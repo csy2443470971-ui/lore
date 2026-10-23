@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { PanResponder, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { PanResponder, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { dayKey } from './store';
 import { SZ } from './theme';
-import { useFace, useLang, useS, useT } from './ui';
+import { Text, useFace, useLang, useS, useT } from './ui';
 
 /* Choosing days to write as one page: a month of days, Monday first. Tap the first day and then the last, or drag
    across them; the days between join into one band. Days with something written have a small red dot. */

@@ -21,7 +21,8 @@ import { agentOn, fixText, readPage, sectionsOf } from './src/agent';
 import { dayKey, isDayKey, isSpanKey, keepPhoto, loadDays, loadMine, relative, saveDay, saveMine } from './src/store';
 import { useLive } from './src/live';
 import { dark as darkT, light as lightT } from './src/theme';
-import { DotField, LangCtx, Notice, ThemeCtx, Toast } from './src/ui';
+import { DotField, FontCtx, LangCtx, Notice, ThemeCtx, Toast } from './src/ui';
+import { FONT_KEYS, FontKey, useChineseFace } from './src/fonts';
 import { Home } from './src/Home';
 import { Archive, Insights, Settings } from './src/Screens';
 import { DayMenu } from './src/DayMenu';
@@ -95,6 +96,8 @@ export default function App() {
   const [voice, setVoiceState] = useState(true);       // voice bars at the top left of what was said
   const [indent, setIndentState] = useState(false);    // first-line indent on the page
   const [where, setWhereState] = useState(false);      // record where each day was written
+  const [font, setFontState] = useState<FontKey>('song');   // the Chinese face of the whole app
+  const { face: cnFace, fetching: fontFetching } = useChineseFace(font);
   const [pane, setPane] = useState<Pane>(null);
   const [today, setToday] = useState(() => dayKey());
   const [days, setDays] = useState<Record<string, Day>>(() => ({ [today]: { ...EMPTY, photos: SEED } }));
@@ -117,7 +120,8 @@ export default function App() {
   const via = useRef<'live' | 'audio'>('audio');      // which one is recording: Apple's recogniser, or expo-audio
 
   useEffect(() => {
-    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice', 'qd-indent', 'qd-place']).then((kv) => {
+    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice', 'qd-indent', 'qd-place', 'qd-font']).then((kv) => {
+      const f = kv[6][1] as FontKey; if (FONT_KEYS.includes(f)) setFontState(f);
       if (kv[5][1] === '1') setWhereState(true);
       if (kv[4][1] === '1') setIndentState(true);
       if (kv[2][1] === '0') setGrammarState(false);
@@ -130,6 +134,7 @@ export default function App() {
   const setLang = (l: Lang) => { setLangState(l); AsyncStorage.setItem('qd-lang', l).catch(() => {}); };
   const setGrammar = (g: boolean) => { setGrammarState(g); AsyncStorage.setItem('qd-grammar', g ? '1' : '0').catch(() => {}); };
   const setVoice = (v: boolean) => { setVoiceState(v); AsyncStorage.setItem('qd-voice', v ? '1' : '0').catch(() => {}); };
+  const setFont = (f: FontKey) => { setFontState(f); AsyncStorage.setItem('qd-font', f).catch(() => {}); };
   const setIndent = (v: boolean) => { setIndentState(v); AsyncStorage.setItem('qd-indent', v ? '1' : '0').catch(() => {}); };
   /* turning "Record where you write" on asks for location once; without it the setting stays off */
   const setWhere = async (v: boolean) => {
@@ -268,6 +273,32 @@ export default function App() {
       const id = 'p' + Date.now().toString(36);
       return { ...d, placed: [...(d.placed ?? []), { id, idx }], moved: { ...d.moved, [id]: at } };
     });
+  }
+  /* a photo taken off the page: one put there by hand goes; one laid out with its words is marked off. Either way it
+     stays among the thumbnails and can be put back */
+  function offPage(key: string) {
+    update(cur, (d) => {
+      if ((d.placed ?? []).some((p) => p.id === key)) {
+        const moved = { ...d.moved }; delete moved[key];
+        return { ...d, placed: d.placed!.filter((p) => p.id !== key), moved };
+      }
+      return { ...d, moved: { ...d.moved, [key]: { ...(d.moved?.[key] ?? { x: 0, y: 0 }), off: true } } };
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }
+  /* a paragraph (its item) moved to go before another item, or to the end of what is laid out; photos kept by item
+     and part move with their items */
+  function moveItem(from: number, before: number) {
+    const d = day;
+    if (from >= d.laid || before > d.laid || before === from || before === from + 1) return;
+    const order = d.said.map((_, i) => i);
+    order.splice(from, 1);
+    order.splice(before > from ? before - 1 : before, 0, from);
+    const now = new Map(order.map((old, i) => [old, i]));
+    const re = (k: string) => { const m = /^(\d+)-(\d+)$/.exec(k); return m ? `${now.get(+m[1]) ?? +m[1]}-${m[2]}` : k; };
+    remember(cur, d);
+    update(cur, () => ({ ...d, said: order.map((i) => d.said[i]), moved: d.moved && Object.fromEntries(Object.entries(d.moved).map(([k, v]) => [re(k), v])) }));
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   }
   /* photos kept before the page knew their shape are measured now, once */
   useEffect(() => {
@@ -630,6 +661,7 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <LangCtx.Provider value={lang}>
+      <FontCtx.Provider value={cnFace}>
         <ThemeCtx.Provider value={t}>
           <View style={[styles.root, { backgroundColor: t.b }]}>
             <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -649,7 +681,7 @@ export default function App() {
                   said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} indent={indent} onCamera={camera} onPick={pick} onOpen={setPane} onRecord={rec}
                   onSaved={(x) => { update(cur, (d) => ({ ...d, said: [...d.said, x] })); grow(cur); note(cur); }} onLayout={layout} onUndo={past[cur]?.length ? undo : undefined} onMerge={mergeUp} onNotice={setNotice}
                   placed={day.placed} moved={day.moved} onText={editText}
-                  onPlace={placePhoto}
+                  onPlace={placePhoto} onOffPage={offPage} onReorder={moveItem}
                   onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))}
                   stickers={day.stickers} slap={slap} mine={mine} onAddSticker={addSticker} onSticker={moveSticker} onMakeSticker={makeSticker} onPhoto={onPhoto} />
                 )}
@@ -658,12 +690,13 @@ export default function App() {
                 {ranging ? <RangePicker today={today} has={has} onClose={() => setRanging(false)} onPick={combine} /> : null}
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
-                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} where={where} setWhere={setWhere} />
+                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} font={font} setFont={setFont} fontFetching={fontFetching} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} where={where} setWhere={setWhere} />
                 <Toast notice={notice} onClose={closeNotice} />
               </>
             )}
           </View>
         </ThemeCtx.Provider>
+      </FontCtx.Provider>
       </LangCtx.Provider>
     </SafeAreaProvider>
     </GestureHandlerRootView>
