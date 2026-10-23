@@ -8,21 +8,19 @@ import { BlurView } from 'expo-blur';
 import { AudioPlayer, createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { hyphenateSync } from 'hyphen/en';
-import { CN, Metric, SERIF } from './metrics';
+import { Metric, SERIF } from './metrics';
 import { Pic, Placed, Pos, Said, Sticker } from './session';
 import { stickerSrc } from './stickers';
 import { OUTLINES } from './outlines';
 import { fileUri } from './store';
-import { SZ } from './theme';
-import { Text, TextInput, useFace, useLang, useS, useT } from './ui';
+import { F, SZ } from './theme';
+import { Text, TextInput, useCn, useS, useT } from './ui';
 
 const src = (p: Pic) => (p.uri ? { uri: p.uri } : p.asset);
 
 function useTx() {
   const t = useT();
-  const face = useFace();
-  const zh = useLang() === 'zh';
-  return [zh ? d.tx : d.txEn, { color: t.ink, fontFamily: face.body }];
+  return [d.tx, { color: t.ink }];
 }
 
 /* Before layout: only the tidied words, in the order they were said. Photos aren't matched to sentences yet;
@@ -30,13 +28,14 @@ function useTx() {
 export function Stream({ items, onEdit }: { items: Said[]; onEdit?: (i: number, part: number) => void }) {
   const S = useS();
   const tx = useTx();
+  const cn = useCn();
   return (
     <View style={{ gap: 16 }}>
       {items.map((x, i) => (x.kind === 'head' || (x.kind === 'talk' && !x.text) ? null : (
         <Text key={i} style={tx} onPress={onEdit && x.kind === 'talk' ? () => onEdit(i, -1) : undefined}>
           {/* a recording that names photos is made of one stretch per photo: each can be tapped on its own to edit it */}
-          {x.kind === 'talk' ? x.text : x.parts.map((p, j) => (
-            <Text key={j} onPress={onEdit ? () => onEdit(i, j) : undefined}>{j && S.is !== '是' ? ' ' : ''}{p.spoken ?? p.text}</Text>
+          {x.kind === 'talk' ? mixed(x.text, d.tx.fontSize, cn.body) : x.parts.map((p, j) => (
+            <Text key={j} onPress={onEdit ? () => onEdit(i, j) : undefined}>{mixed((j && S.is !== '是' ? ' ' : '') + (p.spoken ?? p.text), d.tx.fontSize, cn.body)}</Text>
           ))}
         </Text>
       )))}
@@ -104,11 +103,22 @@ type Spot = { key: string; x: number; w: number; p: number; k: number; n: number
 const PAD = 9;                                    // the space between a photo and the words, the same on every side
 const HEADW = 150;                                // the room a paragraph's heading and time (or voice bar) need beside a photo
 
+/* Diary text is set by script, whatever language the app itself is in: Chinese characters and Chinese punctuation in
+   the chosen Chinese face, everything else (English, numbers) in Newsreader, a little larger so the two read as one
+   size. The same words look the same with the app in Chinese or in English. */
+const CJK_ANY = /[⺀-鿿豈-﫿　-〿＀-￯]/;
+export const isCJK = (s: string) => CJK_ANY.test(s);
+export const LATIN = 15 / 14;                     // Newsreader's size over the Chinese face's
+/* a stretch of diary text as runs, each in its own face, for a Text whose fontSize is the Chinese size */
+export function mixed(text: string, size: number, cn: string): React.ReactNode[] {
+  return (text.match(/[⺀-鿿豈-﫿　-〿＀-￯]+|[^⺀-鿿豈-﫿　-〿＀-￯]+/g) ?? []).map((r, i) => (
+    <Text key={i} style={isCJK(r) ? { fontFamily: cn, fontSize: size } : { fontFamily: F.serif, fontSize: size * LATIN }}>{r}</Text>
+  ));
+}
+/* a Chinese character is a full em wide; everything else is measured from Newsreader's own widths, at its size */
 const adv = (m: Metric, size: number, s: string) => {
   let w = 0;
-  /* a Chinese character is a full em wide whatever the page's language: Chinese written on a page set in English
-     (or the other way round) is measured per character, so the lines come out right and nothing overlaps */
-  for (const ch of s) w += CJK.test(ch) || /[　-〿＀-￯]/.test(ch) ? size : (m.w[ch.codePointAt(0)!] ?? m.def) / m.upm * size;
+  for (const ch of s) w += CJK.test(ch) || /[　-〿＀-￯]/.test(ch) ? size : (m.w[ch.codePointAt(0)!] ?? m.def) / m.upm * size * LATIN;
   return w;
 };
 /* Chinese breaks between any two characters, other scripts between words */
@@ -132,11 +142,11 @@ function cuts(word: string): number[] {
 /* A photo belongs to one paragraph and covers whole lines, so its edges sit PAD from the ink of the lines above and below,
    as they do from the words beside it; when it is taller than its words, the next paragraph goes on beside it. */
 /* heads: room kept above each paragraph for its time heading and voice bar; tops: where that room starts */
-/* indent: how far the first line of each paragraph starts in (0 when first-line indent is off) */
+/* indents: how far the first line of each paragraph starts in (0 when first-line indent is off) */
 /* a sticker the words go around: the points of its outline, turned as it is, x across the page and y down from the top
    of the paragraph it is tied to; it changes only the lines of that paragraph and the ones after it */
 type Float = { p: number; pts: { x: number; y: number }[] };
-function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number, heads: number[] = [], indent = 0, floats: Float[] = [], rowsAt: number[] = []) {
+function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: number, lh: number, gap: number, heads: number[] = [], indents: number[] = [], floats: Float[] = [], rowsAt: number[] = []) {
   const e = PAD - (lh - size) / 2;                // how far a photo's edge sits inside its first and last line
   const minSeg = size * 4;                        // a gap beside a photo narrower than this stays empty
   const lines: Line[] = [], starts: number[] = [], rows: number[] = [], tops: number[] = [];
@@ -226,7 +236,7 @@ function flow(paras: string[], spots: Spot[], width: number, m: Metric, size: nu
       for (const [s0, f] of free(ly)) {
         while (i < tk.length && /^\s+$/.test(tk[i])) i++;
         if (i >= tk.length) break;
-        const s = i === 0 ? s0 + indent : s0;
+        const s = i === 0 ? s0 + (indents[pi] ?? 0) : s0;
         let acc = 0;
         const from = i;
         while (i < tk.length) {
@@ -467,10 +477,9 @@ function MovableIn({ id, r, slot, z, W, locked, block, grab, move, drop, open, t
         report(-1);
       })
       .onFinalize(() => end(2));
-    if (block && Platform.OS !== 'web') { pan.blocksExternalGesture(block as never); pinch.blocksExternalGesture(block as never); }
     const tap = Gesture.Tap().maxDuration(600).maxDistance(12).onEnd((_e, ok) => { if (ok) scheduleOnRN(onOpen, id); });
     return Gesture.Race(tap, Gesture.Simultaneous(pan, pinch));
-  }, [id, W, locked, block, onGrab, onMove, onDrop, onOpen, x, y, w, h, home, live, px, py, fx, fy, want, sits, size, last, two]);
+  }, [id, W, locked, onGrab, onMove, onDrop, onOpen, x, y, w, h, home, live, px, py, fx, fy, want, sits, size, last, two]);
   /* a second finger elsewhere on the page: the photo grows or shrinks by how far apart the two fingers are */
   useAnimatedReaction(() => { const tt = two.get(); return tt.on && tt.id === id ? spread(tt) : 0; }, (s) => {
     if (!s) { far.set({ w: 0, h: 0 }); return; }
@@ -598,10 +607,9 @@ function StuckIn({ st, top, W, source, slap, locked, bin, block, place, carry, s
       .onStart(() => { r0.set(rot.get()); begin(4); })
       .onUpdate((e) => { rot.set(r0.get() + e.rotation * 180 / Math.PI); report(); })
       .onFinalize(() => end(4));
-    if (block && Platform.OS !== 'web') for (const g of [pan, pinch, turn]) g.blocksExternalGesture(block as never);
     const touch = Gesture.Tap().enabled(!locked).maxDuration(600).maxDistance(12).onEnd((_e, ok) => { if (ok) scheduleOnRN(onTap, id); });
     return Gesture.Race(touch, Gesture.Simultaneous(pan, pinch, turn));
-  }, [id, W, locked, block, onPlace, onCarry, onSlide, onTap, onHold, bx, by, bw, br, dx, dy, sc, rot, live, over, s0, r0, binAt, last, wraps, two]);
+  }, [id, W, locked, onPlace, onCarry, onSlide, onTap, onHold, bx, by, bw, br, dx, dy, sc, rot, live, over, s0, r0, binAt, last, wraps, two]);
   /* a second finger elsewhere on the page: the sticker grows, shrinks and turns with the two fingers */
   useAnimatedReaction(() => { const t = two.get(); return t.on && t.id === id ? [spread(t), turned(t)] : null; }, (v) => {
     if (!v) { far.set({ s: 0, r: 0, on: false }); return; }
@@ -678,7 +686,7 @@ function Lifted({ text, top, W, ink, p, gaps, up, down, onSlot, onMove, onUp, on
       <GestureDetector gesture={drag}>
         <Re.View style={[d.lift, { top: top - 12, width: W + 24 }, lifted]}>
           <View style={[d.liftCard, { backgroundColor: t.panel }]}>
-            <Text style={[ink, { textAlign: 'justify' }]}>{text}</Text>
+            <Text style={[ink, { textAlign: 'justify' }]}>{mixed(text, ink.fontSize, ink.fontFamily)}</Text>
           </View>
           <View style={[d.liftBar, { borderColor: t.gray, backgroundColor: t.panel + 'B8' }]}>
             <BlurView intensity={40} tint={t.dark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
@@ -745,12 +753,13 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
 }) {
   const t = useT();
   const S = useS();
-  const face = useFace();
-  const zh = useLang() === 'zh';
   const W = Dimensions.get('window').width - 2 * SZ.px;     // the page is today itself: no card, the full width
-  const size = zh ? 14 : 15, lh = zh ? 21 : 19.5, gap = 17;
-  const m = zh ? CN : SERIF;
-  const run = (spots: Spot[], rowsAt: number[] = []) => flow(paras, spots, W, m, size, lh, gap, heads, indent ? (zh ? size * 2 : adv(m, size, 'nnnn')) : 0, floats, rowsAt);
+  /* the same size, line height and spacing whatever language the app is in (see isCJK) */
+  const size = 14, lh = 21, gap = 17;
+  const m = SERIF;
+  const cn = useCn();
+  const run = (spots: Spot[], rowsAt: number[] = []) => flow(paras, spots, W, m, size, lh, gap, heads,
+    paras.map((pa) => (!indent ? 0 : isCJK(pa.trimStart().charAt(0)) ? size * 2 : adv(m, size, 'nnnn'))), floats, rowsAt);
 
   /* one paragraph per recording; a recording about photos brings its photos (a group counts as one tile) */
   const paras: string[] = [];
@@ -782,8 +791,11 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     para(text, from, x.at);
   });
   /* above a paragraph: its time heading, then a row with the time it was said and, where a stretch of talking starts, its voice bar */
-  const HEAD = 26, BAR = 30, TIME = 20;
-  const heads = marks.map((mk) => (mk.head ? HEAD : 0) + (mk.bar ? BAR : mk.time ? TIME : 0));
+  /* Three steps of space: lines 21 apart; paragraphs a gap of 17 (with the time each was said above it); a new part of
+     the day (its heading) a further 30 above, so the parts read as parts. */
+  const HEAD = 30, BAR = 30, TIME = 20, SEC = 30;
+  const sec = (mk: { head?: string }, pi: number) => (mk.head && pi > 0 ? SEC : 0);
+  const heads = marks.map((mk, pi) => sec(mk, pi) + (mk.head ? HEAD : 0) + (mk.bar ? BAR : mk.time ? TIME : 0));
   /* stickers the words go around; one being moved goes around where the fingers have it now */
   const [slid, setSlid] = useState<Sticker | null>(null);
   const [picked, setPicked] = useState<string | null>(null);     // the sticker tapped: its switch shows
@@ -973,8 +985,10 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   useEffect(() => { binNow.current.at = bin; binNow.current.show = onPhotoBin; binNow.current.remove = onRemove; });
   const heldId = useRef<string | null>(null);
   const shove = useSharedValue<Shove>({ id: '', dy: 0, n: 0 });
-  const edge = useRef(onEdge);
-  useEffect(() => { edge.current = onEdge; });
+  const edge = useRef(onEdge), dragging = useRef(onDrag);
+  useEffect(() => { edge.current = onEdge; dragging.current = onDrag; });
+  /* a sticker held, or let go: the page stops scrolling while it is held */
+  const holdSticker = useCallback((id: string | null) => { setHolding(id); dragging.current?.(!!id); }, []);
   /* the words reflow only when the photo's place really changes (its paragraph, line, or some points across), at most once a frame */
   const shown = useRef('');
   /* While a photo is held the words make room for it as it goes, in real time: each time its place changes (a line, a
@@ -995,6 +1009,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     heldId.current = id;
     shown.current = ''; last.current = null;
     setPicked(null); setFront(id); setHolding(id);
+    dragging.current?.(true);                     // the page stops scrolling only now, once the photo is really held
     Haptics.selectionAsync().catch(() => {});     // it has been taken hold of
   }, []);
   /* A photo held at (x, y) with this size, the finger at (fgx, fgy): with the finger on the words it goes beside them,
@@ -1058,6 +1073,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     setHolding(null);
     const id = heldId.current, bn = binNow.current;
     heldId.current = null;
+    dragging.current?.(false);
     edge.current?.(null);
     if (bn.state) {
       const off = bn.state === 'over';
@@ -1164,7 +1180,8 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   const canLift = !!(onMerge || onShare || onSelect) && !onChoose;
   const hold = (p: number) => (canLift ? () => { setSlotAt(null); setLifted(p); } : undefined);
   const marked = (p: number) => !!chosen?.has(`t${srcs[p][0].item}`);
-  const ink = useMemo(() => ({ fontSize: size, lineHeight: lh, color: t.ink, fontFamily: face.body }), [size, lh, t.ink, face.body]);
+  const ink = useMemo(() => ({ fontSize: size, lineHeight: lh, color: t.ink, fontFamily: cn.body }), [size, lh, t.ink, cn.body]);
+  const inkLa = useMemo(() => ({ fontSize: size * LATIN, lineHeight: lh, color: t.ink, fontFamily: F.serif }), [size, lh, t.ink]);
   /* the taps reach the latest page through a ref, so the line pieces keep the same handlers and needn't re-render */
   const acts = useRef({ edit, hold });
   useEffect(() => { acts.current = { edit, hold }; });
@@ -1178,7 +1195,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     const key = `${l.p}:${toks[0]?.o ?? li}`;          // a line is known by its paragraph and first word, not its number
     const natural = toks.reduce((a, tk, j) => a + (j === toks.length - 1 ? tk.w : tk.full), 0);
     const cuts = toks.slice(1).filter((tk) => !NO_START.test(tk.s)).length;
-    const chars = toks.every((tk) => tk.s.length === 1);
+    const chars = toks.every((tk) => tk.s.length === 1 && isCJK(tk.s));
     const room = l.w - natural;
     const narrow = l.w < W * 0.6;                   // a column beside a photo: its edge faces the photo, so it stretches further
     const each = !l.last && cuts > 0 && room > 0 && room / cuts <= size * (chars ? 0.3 : narrow ? 0.9 : 0.6) ? room / cuts : 0;
@@ -1196,7 +1213,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     return [mark, ...toks.map((tk, j) => {
       const at = x;
       x += tk.full + (j < toks.length - 1 && !NO_START.test(toks[j + 1].s) ? each : 0);
-      return <Word key={`${key}-${j}`} s={tk.s.trimEnd()} x={at} y={l.y} p={l.p} o={tk.o} ink={ink} tap={tap} hold={canHold ? press : undefined} />;
+      return <Word key={`${key}-${j}`} s={tk.s.trimEnd()} x={at} y={l.y} p={l.p} o={tk.o} ink={isCJK(tk.s) ? ink : inkLa} tap={tap} hold={canHold ? press : undefined} />;
     })];
   };
 
@@ -1205,17 +1222,17 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       {naming !== null ? (
         <TextInput value={naming} onChangeText={setNaming} autoFocus selectTextOnFocus returnKeyType="done" selectionColor={t.red} placeholder={title}
           placeholderTextColor={t.mut} onSubmitEditing={() => { onRename?.(naming); setNaming(null); }} onBlur={() => { onRename?.(naming); setNaming(null); }}
-          style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title, padding: 0 }]} />
+          style={[isCJK(naming) || !/[A-Za-z]/.test(naming) ? d.title : d.titleEn, { color: t.ink, fontFamily: isCJK(naming) || !/[A-Za-z]/.test(naming) ? cn.title : F.serif, padding: 0 }]} />
       ) : title ? (
-        <Text onPress={onRename ? () => setNaming(ownTitle || title) : undefined} suppressHighlighting style={[zh ? d.title : d.titleEn, { color: t.ink, fontFamily: face.title }]}>{title}</Text>
+        <Text onPress={onRename ? () => setNaming(ownTitle || title) : undefined} suppressHighlighting style={[isCJK(title) ? d.title : d.titleEn, { color: t.ink, fontFamily: isCJK(title) ? cn.title : F.serif }]}>{title}</Text>
       ) : null}
       {meta ? <Text style={[d.meta, { color: t.mut }]}>{meta}</Text> : null}
       <View ref={area} collapsable={false} style={{ height: Math.max(height, ...(stickers ?? []).map((st) => (st.p >= 0 ? (tops[Math.min(st.p, tops.length - 1)] ?? 0) : 0) + st.y + st.w)), marginTop: 12 }}>
         {marks.map((mk, pi) => (
           <React.Fragment key={`m${pi}`}>
-            {mk.head ? <Text style={[d.head, { top: tops[pi], left: headX[pi] ?? 0, color: t.ink, fontFamily: face.title }]}>{mk.head}</Text> : null}
+            {mk.head ? <Text style={[d.head, { top: tops[pi] + sec(mk, pi), left: headX[pi] ?? 0, color: t.ink, fontFamily: isCJK(mk.head) ? cn.title : F.serif }]}>{mk.head}</Text> : null}
             {mk.bar || mk.time ? (
-              <View style={[d.stamp, { top: tops[pi] + (mk.head ? HEAD : 0), left: headX[pi] ?? 0, height: mk.bar ? 22 : 16 }]}>
+              <View style={[d.stamp, { top: tops[pi] + sec(mk, pi) + (mk.head ? HEAD : 0), left: headX[pi] ?? 0, height: mk.bar ? 22 : 16 }]}>
                 {mk.time ? <Text style={[d.time, { color: t.mut }]}>{clock(mk.time)}</Text> : null}
                 {mk.bar ? <VoiceBar bar={mk.bar} /> : null}
               </View>
@@ -1245,7 +1262,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
           const p = Math.min(st.p, tops.length - 1);
           return (
             <Stuck key={st.id} st={st} top={st.p >= 0 && p >= 0 ? tops[p] : 0} W={W} source={source} slap={st.id === slap} locked={locked || !onSticker || !!onChoose}
-              bin={bin} block={scroll} place={stick} carry={onStickerDrag} slide={slide} tap={setPicked} two={two} hold={setHolding} />
+              bin={bin} block={scroll} place={stick} carry={onStickerDrag} slide={slide} tap={setPicked} two={two} hold={holdSticker} />
           );
         })}
         {picked && onSticker ? (() => {
@@ -1341,7 +1358,7 @@ function VoiceBar({ bar }: { bar: Bar }) {
 }
 
 const d = StyleSheet.create({
-  head: { position: 'absolute', left: 0, fontSize: 14.5, lineHeight: 20, fontWeight: '600' },
+  head: { position: 'absolute', left: 0, fontSize: 16, lineHeight: 22, fontWeight: '600' },
   marker: { position: 'absolute', borderRadius: 3 },
   second: { position: 'absolute', left: -60, right: -60, top: -600, bottom: -900, zIndex: 9 },
   seg: { position: 'absolute', zIndex: 6, flexDirection: 'row', borderRadius: 17, padding: 3, gap: 2, width: 236, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 5 },
@@ -1360,7 +1377,7 @@ const d = StyleSheet.create({
   check: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   checkT: { fontSize: 12, fontWeight: '700', marginTop: -1 },
   stamp: { position: 'absolute', left: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  time: { fontSize: 11.5, letterSpacing: 0.3, fontVariant: ['tabular-nums'] },
+  time: { fontSize: 12, letterSpacing: 0.3, fontVariant: ['tabular-nums'], fontFamily: F.serif },   // the same in either language
   bar: { flexDirection: 'row', alignItems: 'center', gap: 7, height: 22, paddingLeft: 3, paddingRight: 9, borderRadius: 11 },
   play: { width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   tri: { width: 0, height: 0, marginLeft: 1.5, borderLeftWidth: 6, borderTopWidth: 4, borderBottomWidth: 4, borderLeftColor: '#fff', borderTopColor: 'transparent', borderBottomColor: 'transparent' },
@@ -1368,8 +1385,7 @@ const d = StyleSheet.create({
   pauseBar: { width: 2, height: 7, borderRadius: 1, backgroundColor: '#fff' },
   waves: { flexDirection: 'row', alignItems: 'center', gap: 1.5, height: 12 },
   barT: { fontSize: 11, letterSpacing: 0.2, fontVariant: ['tabular-nums'] },
-  tx: { fontSize: 16, lineHeight: 29 },
-  txEn: { fontSize: 17.5, lineHeight: 27 },
+  tx: { fontSize: 16, lineHeight: 28 },
   page: { paddingTop: 6 },
   title: { fontSize: 20, lineHeight: 28 },
   titleEn: { fontSize: 23, lineHeight: 28, letterSpacing: -0.2 },
