@@ -52,8 +52,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "选照片放进今天的日记。",
-          "cameraPermission": "拍一张照片放进今天的日记。"
+          "photosPermission": "选照片或视频放进今天的日记。",
+          "cameraPermission": "拍照片或视频放进今天的日记。"
         }
       ],
       [
@@ -72,6 +72,7 @@
         }
       ],
       "./plugins/with-quoted-bundle-script",
+      "./plugins/with-scene-lifecycle",
       [
         "expo-location",
         {

@@ -27,6 +27,24 @@ export function nameFrom(before: string, after: string, start: number, end: numb
   return { name, heard: heard && heard !== name ? [heard] : [] };
 }
 
+/* The stretch just retyped (one change, widened to whole words in Latin script), so a name corrected by typing over it
+   is offered without selecting it again. A single Chinese character changed (小林 → 小琳) is not offered: what the
+   whole name is can't be told from it, so that one is selected by hand. */
+export function retyped(before: string, after: string): { start: number; end: number } | null {
+  if (before === after) return null;
+  let a = 0;
+  while (a < before.length && a < after.length && before[a] === after[a]) a++;
+  let b = 0;
+  while (b < before.length - a && b < after.length - a && before[before.length - 1 - b] === after[after.length - 1 - b]) b++;
+  let s = a, e = after.length - b;
+  const w = /[A-Za-z'’-]/;
+  while (s > 0 && w.test(after[s - 1])) s--;
+  while (e < after.length && w.test(after[e])) e++;
+  const word = after.slice(s, e).trim();
+  if (word.length < 2 || word.length > 24 || /[\n,，。.!?！？、；;：:]/.test(word)) return null;
+  return { start: s, end: e };
+}
+
 /* a name added to the list: one already there keeps its spelling and gains the new way it was heard */
 export function addName(list: Name[], n: Name): Name[] {
   const i = list.findIndex((x) => x.name === n.name);
