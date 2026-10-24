@@ -13,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Newsreader_300Light, Newsreader_400Regular, Newsreader_400Regular_Italic } from '@expo-google-fonts/newsreader';
 import { Lang, STR } from './src/data';
 import { PHOTO } from './src/images';
-import { Day, Pos, removePhotos, Said, Sticker } from './src/session';
+import { Day, Pic, Pos, removePhotos, Said, Sticker } from './src/session';
 import type { Pin } from './src/places';
 import { sentences } from './src/match';
 import { sectionize, timeRules } from './src/sections';
@@ -36,7 +36,12 @@ type Mode = 'light' | 'dark' | 'auto';
 type Pane = null | 'archive' | 'insights' | 'settings';
 const EMPTY: Day = { photos: [], groups: [], said: [], laid: 0 };
 /* a kept photo, with its shape (height over width) so the page can set it in the shape nearest its own */
-const keepShaped = async (a: ImagePicker.ImagePickerAsset) => ({ ...(a.type === 'video' ? await keepVideo(a.uri, a.duration ? a.duration / 1000 : undefined) : await keepPhoto(a.uri)), ...(a.width && a.height ? { r: a.height / a.width } : {}) });
+const keepShaped = async (a: ImagePicker.ImagePickerAsset): Promise<Pic> => {
+  const shape = a.width && a.height ? { r: a.height / a.width } : {};
+  if (a.type !== 'video') return { ...(await keepPhoto(a.uri)), ...shape };
+  const v = await keepVideo(a.uri, a.duration ? a.duration / 1000 : undefined);
+  return v.r ? v : { ...v, ...shape };            // a video's own frame knows its shape best
+};
 /* web only: ?seed=photos starts today with six sample photos, so the photo flow can be shown without a photo library */
 const SEED = Platform.OS === 'web' && typeof location !== 'undefined' && location.search.includes('seed=photos')
   ? ['cafe', 'latte', 'sunset', 'osmanthus', 'noodles', 'hotpot'].map((k) => ({ asset: PHOTO[k] })) : [];

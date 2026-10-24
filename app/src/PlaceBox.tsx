@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -78,6 +78,12 @@ export function PlaceBox({ onPick, onClose }: { onPick: (p: Pin) => void; onClos
   const [linked, setLinked] = useState<(Found & { url: string; from?: Pin['from'] }) | null>(null);
   const [busy, setBusy] = useState(false);
   const [making, setMaking] = useState(false);
+  const [kb, setKb] = useState(false);                     // the keyboard is up: the sheet's foot needs no room for the home bar
+  useEffect(() => {
+    const on = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKb(true));
+    const off = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKb(false));
+    return () => { on.remove(); off.remove(); };
+  }, []);
   /* each change of the words looks again, a moment after typing stops (a pasted link at once); only the latest answer shows */
   const asked = useRef(0), timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -129,21 +135,23 @@ export function PlaceBox({ onPick, onClose }: { onPick: (p: Pin) => void; onClos
       </Pressable>
     );
   };
+  /* the sheet sits in the flow at the bottom (not pinned there), so the keyboard pushes all of it up above itself; with
+     the keyboard up it may shrink, and the list inside scrolls */
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[StyleSheet.absoluteFill, { zIndex: 25 }]}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[StyleSheet.absoluteFill, p.wrap, { paddingTop: ins.top + 56 }]}>
       <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.18)' }]} onPress={onClose} accessibilityLabel={S.cancel} />
-      <View style={[p.sheet, { backgroundColor: t.panel, maxHeight: height * 0.7, paddingBottom: ins.bottom + 10 }]}>
+      <View style={[p.sheet, { backgroundColor: t.panel, maxHeight: height * 0.72, paddingBottom: kb ? 10 : ins.bottom + 10 }]}>
         <View style={[p.grip, { backgroundColor: t.gray }]} />
         <Text style={[p.title, { color: t.ink, fontFamily: face.title }]}>{S.placeTitle}</Text>
         <View style={[p.field, { backgroundColor: t.b }]}>
-          <TextInput value={q} onChangeText={type} autoFocus placeholder={S.placeAsk} placeholderTextColor={t.mut} returnKeyType="search"
+          <TextInput value={q} onChangeText={type} placeholder={S.placeAsk} placeholderTextColor={t.mut} returnKeyType="search"
             style={[p.input, { color: t.ink }]} autoCorrect={false} />
           {busy || making ? <ActivityIndicator size="small" color={t.mut} /> : q ? (
             <Pressable onPress={() => type('')} hitSlop={10}><Text style={{ color: t.mut, fontSize: 15 }}>✕</Text></Pressable>
           ) : null}
         </View>
         <View style={p.opts}>{option('card', S.placeCard)}{option('chip', S.placeChip)}</View>
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 6 }} showsVerticalScrollIndicator={false}>
+        <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ paddingBottom: 6 }} showsVerticalScrollIndicator={false}>
           {linked ? row(linked, 'link', [linked.from ? FROM[linked.from][lang] : null, linked.address].filter(Boolean).join(' · ') || undefined) : null}
           {hits.map((f, i) => row(f, `h${i}`))}
           {typed && !busy ? row({ name: typed }, 'typed', S.placeAsTyped) : null}
@@ -156,7 +164,8 @@ export function PlaceBox({ onPick, onClose }: { onPick: (p: Pin) => void; onClos
 }
 
 const p = StyleSheet.create({
-  sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: SZ.panelR, borderTopRightRadius: SZ.panelR, paddingHorizontal: SZ.px, paddingTop: 10, gap: 12 },
+  wrap: { zIndex: 25, justifyContent: 'flex-end' },
+  sheet: { flexShrink: 1, borderTopLeftRadius: SZ.panelR, borderTopRightRadius: SZ.panelR, paddingHorizontal: SZ.px, paddingTop: 10, gap: 12 },
   grip: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center' },
   title: { fontSize: 16, textAlign: 'center' },
   field: { height: 44, borderRadius: 14, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 8 },

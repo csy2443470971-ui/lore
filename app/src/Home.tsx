@@ -15,10 +15,10 @@ import { Viewer } from './Viewer';
 import { Lift, src, Tray } from './Photos';
 import { agentOn, Heard, marked, transcribe } from './agent';
 import { Pic, Placed, Pos, Said, Sticker, Unit, unitsOf } from './session';
-import { applyNames, Name, nameFrom } from './names';
+import { applyNames, Name, nameFrom, retyped } from './names';
 import { keepRecording } from './store';
 import { F, SZ } from './theme';
-import { Glow, Notice, RecState, Round, TalkKey, Text, TextInput, useCn, useFace, useLang, useS, useT, useTimer } from './ui';
+import { Glow, Icon, Notice, RecState, Round, TalkKey, Text, TextInput, useCn, useFace, useLang, useS, useT, useTimer } from './ui';
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -99,7 +99,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const [bin, setBin] = useState<'on' | 'over' | null>(null);
   const [binPhoto, setBinPhoto] = useState(false);                     // the bin is for a photo (off the page), not a sticker           // a sticker is being carried: the bin shows in the talk key's place
   const [draft, setDraft] = useState('');
-  const before = useRef('');                                            // the words as they were when the edit began
+  const [before, setBefore] = useState('');                             // the words as they were when the edit began
   const [picked, setSelRange] = useState({ start: 0, end: 0 });        // what is selected in the edit, for remembering a name
   /* A photo lifted from the thumbnails at the bottom: it is drawn by the screen at the finger (shared values, moved on
      the screen's own thread, so it follows smoothly whatever the page is doing), and tells the page where it is; the page
@@ -245,7 +245,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
     const x = said[item];
     if (!x || x.kind === 'head' || recording || making || select || carried) return;
     setDraft(x.kind === 'talk' ? x.text : x.parts[part]?.text ?? '');
-    before.current = x.kind === 'talk' ? x.text : x.parts[part]?.text ?? '';
+    setBefore(x.kind === 'talk' ? x.text : x.parts[part]?.text ?? '');
     setSelRange({ start: 0, end: 0 });
     setEditing({ item, part });
   }
@@ -683,19 +683,27 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           <View style={[h.sheet, { backgroundColor: t.b, paddingBottom: 16 }]}>
             <View style={h.sheetBar}>
               <Pressable hitSlop={10} onPress={() => setEditing(null)}><Text style={{ fontSize: 15, color: t.mut }}>{S.cancel}</Text></Pressable>
-              {/* a name selected in the words: remember it (with how it read before), so recordings spell it right */}
-              <Pressable hitSlop={8} disabled={picked.end <= picked.start} onPress={() => {
-                const n = nameFrom(before.current, draft, picked.start, picked.end);
-                if (n) onName(n);
-              }} style={({ pressed }) => [h.nameBtn, { backgroundColor: t.panel, opacity: picked.end <= picked.start ? 0.35 : pressed ? 0.6 : 1 }]}>
-                <Text style={{ fontSize: 13, color: t.ink }}>{S.rememberName}</Text>
-              </Pressable>
               <Pressable hitSlop={10} onPress={saveEdit}><Text style={{ fontSize: 15, color: t.ink, fontWeight: '600' }}>{S.editDone}</Text></Pressable>
             </View>
             <TextInput value={draft} onChangeText={setDraft} multiline autoFocus selectionColor={t.red}
               onSelectionChange={(e) => setSelRange(e.nativeEvent.selection)}
               style={[h.tx, h.input, { color: t.ink }, inFace(draft)]} />
-            <Text style={[h.nameHint, { color: t.mut }]}>{S.nameHint}</Text>
+            {/* a name selected in the words: remember it (with how it read before), so recordings spell it right. It sits
+                under the words, just above the keyboard, where the system's Cut / Copy / Paste menu never covers it */}
+            {(() => {
+              /* what is selected, or else the word just typed over where the caret is */
+              const fix = retyped(before, draft);
+              const at = picked.end > picked.start ? picked : fix && picked.start >= fix.start && picked.start <= fix.end ? fix : null;
+              const word = at ? draft.slice(at.start, at.end).trim() : '';
+              if (!at || !word || word.length > 24 || /\n/.test(word)) return <Text style={[h.nameHint, { color: t.mut }]}>{S.nameHint}</Text>;
+              return (
+                <Pressable hitSlop={6} onPress={() => { const n = nameFrom(before, draft, at.start, at.end); if (n) onName(n); }}
+                  style={({ pressed }) => [h.nameBtn, { backgroundColor: t.pill, opacity: pressed ? 0.7 : 1 }]}>
+                  <Icon name="user" color={t.pillText} size={15} />
+                  <Text numberOfLines={1} style={{ fontSize: 14, color: t.pillText, flexShrink: 1 }}>{S.rememberThis(word)}</Text>
+                </Pressable>
+              );
+            })()}
           </View>
         </KeyboardAvoidingView>
       ) : null}
@@ -733,8 +741,8 @@ const h = StyleSheet.create({
   ctl: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'flex-start' },
   selRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: (SZ.talk - SZ.key) / 2 },
   carry: { position: 'absolute', shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 14, shadowOffset: { width: 0, height: 8 } },
-  nameBtn: { height: 30, paddingHorizontal: 14, borderRadius: 15, justifyContent: 'center' },
-  nameHint: { fontSize: 12, marginTop: 2 },
+  nameBtn: { alignSelf: 'flex-start', height: 34, paddingHorizontal: 14, borderRadius: 17, flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  nameHint: { fontSize: 12, lineHeight: 17, minHeight: 34, paddingTop: 4, marginTop: 2 },
   editWrap: { justifyContent: 'flex-end' },
   sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: SZ.px, paddingTop: 14, gap: 6 },
   sheetBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 4 },

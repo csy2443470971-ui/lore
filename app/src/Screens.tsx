@@ -392,7 +392,7 @@ export function Settings({ open, onClose, mode, setMode, lang, setLang, font, se
   const ins = useSafeAreaInsets();
   return (
     <Panel open={open} onBack={onClose} top={<><Round icon="back" label={S.back} onPress={onClose} /><Text style={[us.topLbl, { color: t.ink }]}>{S.settings}</Text><View style={{ width: 44 }} /></>}>
-      <ScrollView contentContainerStyle={{ padding: 24, paddingTop: 28, paddingBottom: ins.bottom + 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 24, paddingTop: 28, paddingBottom: ins.bottom + 40 }} showsVerticalScrollIndicator={false}>
         <Text style={[a.lede, { color: t.mut, fontFamily: face.italic, marginTop: 0, marginBottom: 18 }]}>{S.setLede}</Text>
         <Row k={S.sLook} sub={S.sLookSub} extra={<Seg value={mode} onChange={setMode} options={[['light', S.light], ['dark', S.dark], ['auto', S.auto]]} />} />
         <Row k={S.sLang} sub={S.sLangSub} extra={<Seg value={lang} onChange={setLang} options={[['zh', '中文'], ['en', 'English']]} />} />

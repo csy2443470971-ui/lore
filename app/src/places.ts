@@ -90,8 +90,11 @@ export function nameAround(text: string, link: string) {
 export async function fromLink(text: string): Promise<(Found & { url: string; from?: Pin['from'] }) | null> {
   const link = linkIn(text);
   if (!link) return null;
+  /* where a short link leads: asked with HEAD first, so the map page itself isn't downloaded; GET when HEAD isn't answered */
   let full = link;
-  try { const r = await fetch(link, { method: 'GET' }); if (r.url) full = r.url; } catch { /* keep the short one */ }
+  for (const method of ['HEAD', 'GET']) {
+    try { const r: Response = await fetch(link, { method }); if (r.url && r.url !== link) { full = r.url; break; } if (r.ok) break; } catch { /* try the next way */ }
+  }
   const got = readLink(full);
   const name = got.name || nameAround(text, link);
   const at = got.lat !== undefined && got.lng !== undefined ? { lat: got.lat, lng: got.lng } : null;

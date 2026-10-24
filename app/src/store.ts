@@ -61,7 +61,8 @@ export async function keepVideo(uri: string, secs?: number): Promise<Pic> {
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- loaded only where the native side is there
     const VT = require('expo-video-thumbnails') as typeof import('expo-video-thumbnails');
     const frame = await VT.getThumbnailAsync(video.uri ?? uri, { time: 0, quality: 0.8 });
-    return { ...(await keepPhoto(frame.uri)), video };
+    // the frame comes out upright, so its shape is the video's as seen (a portrait clip can report itself sideways)
+    return { ...(await keepPhoto(frame.uri)), video, ...(frame.width && frame.height ? { r: frame.height / frame.width } : {}) };
   } catch {
     return { video };
   }
