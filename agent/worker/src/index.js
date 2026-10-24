@@ -15,6 +15,8 @@ import { read } from '../../read.mjs';
 
 const HINT = '普通话日记，常夹杂英文单词。Mandarin journal with English words mixed in.';
 const MAX_AUDIO = 15 * 1024 * 1024, MAX_TEXT = 20000;
+/* the names a writer keeps (sent by the app): a short list of short strings */
+const cleanNames = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim() && x.length <= 24).slice(0, 80) : []);
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 
 async function transcribe(env, audio, extra) {
@@ -27,8 +29,9 @@ async function transcribe(env, audio, extra) {
   return (await r.json()).text ?? '';
 }
 
-/* DeepSeek V4.1 Flash answers in about 0.2 s; V4 Flash is slower but keeps to "words only" best (eval/fix.mjs) */
-const FAST = 'deepseek-ai/DeepSeek-V4.1-Flash', STEADY = 'deepseek-ai/DeepSeek-V4-Flash-0731';
+/* DeepSeek V4.1 Flash answers in about 0.2 s; its 1017 snapshot is the steady one for the jobs nobody waits on.
+   V4 Flash 0731, used before, is no longer served by Together. */
+const FAST = 'deepseek-ai/DeepSeek-V4.1-Flash', STEADY = 'deepseek-ai/DeepSeek-V4.1-Flash-1017';
 async function together(env, model, system, msgs, extra = {}) {
   const r = await fetch('https://api.together.xyz/v1/chat/completions', {
     method: 'POST', headers: { Authorization: `Bearer ${env.TOGETHER_API_KEY}`, 'content-type': 'application/json' },
@@ -36,7 +39,9 @@ async function together(env, model, system, msgs, extra = {}) {
   });
   if (!r.ok) throw new Error(`together ${r.status}`);
   const j = await r.json();
-  return { text: (j.choices?.[0]?.message?.content ?? '').trim() };
+  const text = (j.choices?.[0]?.message?.content ?? '').trim();
+  if (text.includes('ds_safety')) throw new Error('together: safety note in the reply');   // V4.1 Flash sometimes cuts its reply short for one; the node tries again
+  return { text };
 }
 async function haiku(env, system, msgs) {
   const claude = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
@@ -61,9 +66,11 @@ function tidyCall(env, model) {
   let n = 0;
   return (text) => (n++ === 0 ? together(env, model, SYSTEM, messages(text)) : haiku(env, SYSTEM, messages(text)));
 }
+/* the fix node with grammar off goes to Claude Haiku 5.5 first: it leaves the speaker's own grammar alone best (eval/fix.mjs) */
 function fixCall(env, grammar) {
   let n = 0;
-  return (p) => (n++ === 0 ? together(env, grammar ? FAST : STEADY, p.system, p.messages) : haiku(env, p.system, p.messages));
+  if (!grammar) return (p) => (n++ === 0 ? haiku(env, p.system, p.messages) : together(env, STEADY, p.system, p.messages));
+  return (p) => (n++ === 0 ? together(env, FAST, p.system, p.messages) : haiku(env, p.system, p.messages));
 }
 
 export default {
@@ -77,7 +84,7 @@ export default {
       if (url.pathname === '/transcribe') {
         // the app sends { audio: base64, mime } as JSON: m4a from expo-audio, or a 16 kHz WAV from Apple's recogniser in the
         // installed app; a form with an "audio" file works too (curl, the evals)
-        let audio, vocabulary = '', grammar = true;
+        let audio, vocabulary = '', grammar = true, names = [];
         if ((req.headers.get('content-type') ?? '').includes('application/json')) {
           const body = await req.json();
           grammar = body.grammar !== false;
@@ -87,6 +94,7 @@ export default {
           for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
           audio = new File([bytes], 'entry.m4a', { type: body.mime || 'audio/mp4' });
           vocabulary = String(body.vocabulary ?? '');
+          names = cleanNames(body.names);
         } else {
           const form = await req.formData();
           audio = form.get('audio');
@@ -98,7 +106,7 @@ export default {
         const raw = await transcribe(env, audio, vocabulary.slice(0, 300));
         if (!raw.trim()) return json({ raw: '', text: '', via: 'empty' });
         const out = await tidy(raw, tidyCall(env, FAST));
-        const fixed = await fix(out.text, fixCall(env, grammar), grammar);
+        const fixed = await fix(out.text, fixCall(env, grammar), grammar, names);
         return json({ raw, text: fixed.text, tidied: out.text, via: out.via, fixed: fixed.via });
       }
       if (url.pathname === '/tidy') {
@@ -108,9 +116,9 @@ export default {
         return json({ text: out.text, via: out.via });
       }
       if (url.pathname === '/fix') {
-        const { text, grammar } = await req.json();
+        const { text, grammar, names } = await req.json();
         if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT) return json({ error: 'bad text' }, 400);
-        const out = await fix(text, fixCall(env, grammar !== false), grammar !== false);
+        const out = await fix(text, fixCall(env, grammar !== false), grammar !== false, cleanNames(names));
         return json({ text: out.text, via: out.via });
       }
       if (url.pathname === '/sections') {

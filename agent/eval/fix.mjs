@@ -2,7 +2,7 @@
 //   node eval/fix.mjs              all models
 //   node eval/fix.mjs deepseek     only models whose name contains one of these
 // A run passes when every "must" phrase is in the result, no "mustNot" phrase is, an "unchanged" case comes back
-// unchanged (punctuation and spacing aside), and the checks in code accept it.
+// unchanged (punctuation and spacing aside), no "atMost" phrase appears more often than allowed, and the checks in code accept it.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +14,7 @@ const cases = JSON.parse(fs.readFileSync(path.join(here, 'fix-cases.json'), 'utf
 const REPEAT = Number(process.env.REPEAT ?? 2);
 // USD per 1M tokens (input, output)
 const MODELS = [
-  { name: 'DeepSeek V4 Flash (thinking off)', price: [0.14, 0.28], call: (p) => viaTogether('deepseek-ai/DeepSeek-V4-Flash-0731', '', { reasoning: { enabled: false }, prompt: p }) },
+  { name: 'DeepSeek V4.1 Flash 1017 (thinking off)', price: [0.30, 1.20], call: (p) => viaTogether('deepseek-ai/DeepSeek-V4.1-Flash-1017', '', { reasoning: { enabled: false }, prompt: p }) },
   { name: 'DeepSeek V4.1 Flash (thinking off)', price: [0.30, 1.20], call: (p) => viaTogether('deepseek-ai/DeepSeek-V4.1-Flash', '', { reasoning: { enabled: false }, prompt: p }) },
   { name: 'Claude Haiku 5.5 (thinking off)', price: [0.10, 0.50], call: (p) => viaClaude('claude-haiku-5-5', '', { prompt: p }) },
 ];
@@ -33,7 +33,8 @@ for (const m of MODELS.filter((x) => !want.length || want.some((w) => x.name.toL
       if (r.ms) ms.push(r.ms);
       const out = r.text;
       const ok = (c.must ?? []).every((p) => norm(out).includes(norm(p))) && !(c.mustNot ?? []).some((p) => norm(out).includes(norm(p)))
-        && (!c.unchanged || norm(out) === norm(c.in)) && (!c.must?.length || r.via !== 'kept' || !c.mustNot?.length);
+        && (!c.unchanged || norm(out) === norm(c.in))
+        && Object.entries(c.atMost ?? {}).every(([p, k]) => out.split(p).length - 1 <= k) && (!c.must?.length || r.via !== 'kept' || !c.mustNot?.length);
       if (ok) pass++; else fails.push(c.id);
       raw[m.name].push({ id: c.id, rep, via: r.via, out, ok });
     }));

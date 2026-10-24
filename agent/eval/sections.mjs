@@ -11,7 +11,7 @@ const cases = JSON.parse(fs.readFileSync(path.join(here, 'sections-cases.json'),
 const REPEAT = Number(process.env.REPEAT ?? 2);
 const json = { type: 'json_object' };
 const MODELS = [
-  { name: 'DeepSeek V4 Flash (thinking off)', price: [0.14, 0.28], call: (p) => viaTogether('deepseek-ai/DeepSeek-V4-Flash-0731', '', { reasoning: { enabled: false }, response_format: json, prompt: p }) },
+  { name: 'DeepSeek V4.1 Flash 1017 (thinking off)', price: [0.30, 1.20], call: (p) => viaTogether('deepseek-ai/DeepSeek-V4.1-Flash-1017', '', { reasoning: { enabled: false }, response_format: json, prompt: p }) },
   { name: 'DeepSeek V4.1 Flash (thinking off)', price: [0.30, 1.20], call: (p) => viaTogether('deepseek-ai/DeepSeek-V4.1-Flash', '', { reasoning: { enabled: false }, response_format: json, prompt: p }) },
 ];
 let md = '| Model | Passed | Fell back to rules | Median ms | USD per 1,000 days | Failed cases |\n|---|---|---|---|---|---|\n';
