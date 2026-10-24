@@ -14,5 +14,12 @@
   {"id": "zh-clean", "grammar": true, "in": "绝了绝了，这家店的桂花糖藕太好吃了，下次还来。", "unchanged": true},
   {"id": "zh-dialect", "grammar": true, "in": "这事儿整得挺好的嘛，咱们明儿再接着唠。", "unchanged": true},
   {"id": "mix-clean", "grammar": true, "in": "这个 presentation 我准备了很久，结果 boss 说 looks good 就完了。", "unchanged": true},
-  {"id": "mix-de", "grammar": true, "in": "下午跟 Kashish 在图书馆，我教她 vibe coding，她学的很快。", "must": ["Kashish", "vibe coding", "学得很快"], "mustNot": ["学的很快"]}
+  {"id": "mix-de", "grammar": true, "in": "下午跟 Kashish 在图书馆，我教她 vibe coding，她学的很快。", "must": ["Kashish", "vibe coding", "学得很快"], "mustNot": ["学的很快"]},
+  {"id": "zh-repeat", "grammar": true, "in": "今天去公司，然后开了一上午的会，然后中午跟 Amy 吃饭，然后下午又开会，然后就累死了啊。", "must": ["Amy", "累死了啊", "一上午"], "atMost": {"然后": 1}},
+  {"id": "zh-repeat-off", "grammar": false, "in": "今天去公司，然后开了一上午的会，然后中午跟 Amy 吃饭，然后下午又开会，然后就累死了啊。", "unchanged": true},
+  {"id": "zh-particles", "grammar": true, "in": "我觉得这个事情吧其实也没有那么难嘛，就是我自己想太多了呗，哈哈。", "must": ["吧", "嘛", "呗", "哈哈"]},
+  {"id": "zh-flow", "grammar": true, "in": "我们去了海边。很冷。风很大。但是很开心呀。拍了好多照片。", "must": ["海边", "呀", "照片"], "atMost": {"。": 2}},
+  {"id": "zh-twice", "grammar": true, "in": "晚上做了番茄炒蛋，番茄炒蛋做得特别好吃，特别好吃，我妈都说好吃呢。", "must": ["番茄炒蛋", "呢", "我妈"], "atMost": {"番茄炒蛋": 1}},
+  {"id": "en-repeat", "grammar": true, "in": "So we went to the park and then we got ice cream and then we walked around the lake and then it started raining lol.", "must": ["ice cream", "raining", "lol"], "atMost": {"and then": 1}},
+  {"id": "mix-flow", "grammar": true, "in": "今天的 standup 很短，就是说了一下 deadline，就是下周五，就是大家都有点慌哈。", "must": ["standup", "deadline", "下周五", "哈"], "atMost": {"就是": 1}}
 ]

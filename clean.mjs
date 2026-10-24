@@ -30,6 +30,7 @@ export async function viaTogether(model, text, opts = {}) {
     return { text: strip(out), inTok: usage.prompt_tokens ?? 0, outTok: usage.completion_tokens ?? 0, ms: Date.now() - t0 };
   }
   const j = await r.json();
+  if (/ds_safety/.test(j.choices[0].message.content || '')) throw new Error('safety note in the reply');   // DeepSeek V4.1 Flash sometimes cuts its reply short for one
   return { text: strip(j.choices[0].message.content || ''), inTok: j.usage?.prompt_tokens ?? 0, outTok: j.usage?.completion_tokens ?? 0, ms: Date.now() - t0 };
 }
 

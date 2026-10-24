@@ -9,7 +9,7 @@ import { topics } from '../sections.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cases = JSON.parse(fs.readFileSync(path.join(here, 'topics-cases.json'), 'utf8'));
 const REPEAT = Number(process.env.REPEAT ?? 5);
-const call = (p) => viaTogether('deepseek-ai/DeepSeek-V4-Flash-0731', '', { reasoning: { enabled: false }, response_format: { type: 'json_object' }, prompt: p });
+const call = (p) => viaTogether('deepseek-ai/DeepSeek-V4.1-Flash-1017', '', { reasoning: { enabled: false }, response_format: { type: 'json_object' }, prompt: p });
 let total = 0, ok = 0;
 for (const c of cases) {
   const runs = await Promise.all(Array.from({ length: REPEAT }, () => topics(c.sentences, call)));
