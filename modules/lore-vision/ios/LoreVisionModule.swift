@@ -3,6 +3,7 @@ import Vision
 import CoreImage
 import UIKit
 import CoreText
+import MapKit
 
 struct LiftError: Error, CustomStringConvertible {
   let description: String
@@ -41,6 +42,52 @@ public class LoreVisionModule: Module {
       }
     }
 
+    /* places from Apple Maps (free, no key; in China its data comes from AutoNavi): name, a short address, where it is.
+       lat, lng: look around there first. Nothing found is an empty list. */
+    AsyncFunction("searchPlaces") { (query: String, lat: Double?, lng: Double?) async throws -> [[String: Any]] in
+      let req = MKLocalSearch.Request()
+      req.naturalLanguageQuery = query
+      if let lat = lat, let lng = lng {
+        req.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: lat, longitude: lng), latitudinalMeters: 40_000, longitudinalMeters: 40_000)
+      }
+      guard let found = try? await MKLocalSearch(request: req).start() else { return [] }
+      return found.mapItems.prefix(15).map { item in
+        let pm = item.placemark, c = pm.coordinate
+        var out: [String: Any] = ["name": item.name ?? pm.name ?? query, "lat": c.latitude, "lng": c.longitude]
+        if let a = Self.shortAddress(pm) { out["address"] = a }
+        return out
+      }
+    }
+
+    /* a small map around a place with its pin, light or dark, saved as a PNG in Documents/places; w, h in points */
+    AsyncFunction("mapSnapshot") { (lat: Double, lng: Double, w: Double, h: Double, dark: Bool) async throws -> String in
+      let c = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+      let o = MKMapSnapshotter.Options()
+      o.region = MKCoordinateRegion(center: c, latitudinalMeters: 900 * h / max(w, 1), longitudinalMeters: 900)
+      o.size = CGSize(width: w, height: h)
+      o.traitCollection = UITraitCollection(traitsFrom: [UITraitCollection(userInterfaceStyle: dark ? .dark : .light), UITraitCollection(displayScale: 3)])
+      o.pointOfInterestFilter = .excludingAll
+      let snap = try await MKMapSnapshotter(options: o).start()
+      let fmt = UIGraphicsImageRendererFormat()
+      fmt.scale = 3
+      let img = UIGraphicsImageRenderer(size: o.size, format: fmt).image { ctx in
+        snap.image.draw(at: .zero)
+        let p = snap.point(for: c)
+        ctx.cgContext.setShadow(offset: CGSize(width: 0, height: 1.5), blur: 4, color: UIColor.black.withAlphaComponent(0.3).cgColor)
+        UIColor.white.setFill()
+        UIBezierPath(ovalIn: CGRect(x: p.x - 9, y: p.y - 9, width: 18, height: 18)).fill()
+        ctx.cgContext.setShadow(offset: .zero, blur: 0, color: nil)
+        UIColor(red: 0.94, green: 0.29, blue: 0.23, alpha: 1).setFill()
+        UIBezierPath(ovalIn: CGRect(x: p.x - 6, y: p.y - 6, width: 12, height: 12)).fill()
+      }
+      guard let data = img.pngData() else { throw LiftError(description: "no map") }
+      let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("places", isDirectory: true)
+      try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+      let url = dir.appendingPathComponent(String(UUID().uuidString.prefix(12)) + ".png")
+      try data.write(to: url)
+      return url.absoluteString
+    }
+
     AsyncFunction("liftIn") { (uri: String, x: Double, y: Double, w: Double, h: Double) -> String? in
       let photo = try Self.photo(uri)
       let e = photo.extent
@@ -50,6 +97,18 @@ public class LoreVisionModule: Module {
       let crop = photo.cropped(to: r).transformed(by: CGAffineTransform(translationX: -r.minX, y: -r.minY))
       return try Self.sticker(from: crop)
     }
+  }
+
+  /* street and city: Chinese from the city down, run together (上海市静安区南京西路1266号); otherwise "12 Main St, Brooklyn" */
+  private static func shortAddress(_ p: MKPlacemark) -> String? {
+    let han = { (s: String?) in (s ?? "").unicodeScalars.contains { $0.value >= 0x3400 && $0.value <= 0x9FFF } }
+    if han(p.thoroughfare) || han(p.locality) {
+      let s = [p.locality, p.subLocality, p.thoroughfare, p.subThoroughfare].compactMap { $0 }.joined()
+      return s.isEmpty ? p.title : s
+    }
+    let street = [p.subThoroughfare, p.thoroughfare].compactMap { $0 }.joined(separator: " ")
+    let s = [street, p.subLocality ?? p.locality ?? ""].filter { !$0.isEmpty }.joined(separator: ", ")
+    return s.isEmpty ? p.title : s
   }
 
   private static func photo(_ uri: String) throws -> CIImage {

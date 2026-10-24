@@ -14,15 +14,17 @@ import { Newsreader_300Light, Newsreader_400Regular, Newsreader_400Regular_Itali
 import { Lang, STR } from './src/data';
 import { PHOTO } from './src/images';
 import { Day, Pos, removePhotos, Said, Sticker } from './src/session';
+import type { Pin } from './src/places';
 import { sentences } from './src/match';
 import { sectionize, timeRules } from './src/sections';
 import { join, shape } from './src/paragraphs';
 import { agentOn, fixText, readPage, sectionsOf } from './src/agent';
-import { dayKey, isDayKey, isSpanKey, keepPhoto, loadDays, loadMine, relative, saveDay, saveMine } from './src/store';
+import { dayKey, isDayKey, isSpanKey, keepPhoto, keepVideo, loadDays, loadMine, relative, saveDay, saveMine } from './src/store';
 import { useLive } from './src/live';
 import { dark as darkT, light as lightT } from './src/theme';
 import { DotField, FontCtx, LangCtx, Notice, ThemeCtx, Toast } from './src/ui';
 import { FONT_KEYS, FontKey, useChineseFace } from './src/fonts';
+import { addName, Name } from './src/names';
 import { Home } from './src/Home';
 import { Archive, Insights, Settings } from './src/Screens';
 import { DayMenu } from './src/DayMenu';
@@ -34,7 +36,7 @@ type Mode = 'light' | 'dark' | 'auto';
 type Pane = null | 'archive' | 'insights' | 'settings';
 const EMPTY: Day = { photos: [], groups: [], said: [], laid: 0 };
 /* a kept photo, with its shape (height over width) so the page can set it in the shape nearest its own */
-const keepShaped = async (a: ImagePicker.ImagePickerAsset) => ({ ...(await keepPhoto(a.uri)), ...(a.width && a.height ? { r: a.height / a.width } : {}) });
+const keepShaped = async (a: ImagePicker.ImagePickerAsset) => ({ ...(a.type === 'video' ? await keepVideo(a.uri, a.duration ? a.duration / 1000 : undefined) : await keepPhoto(a.uri)), ...(a.width && a.height ? { r: a.height / a.width } : {}) });
 /* web only: ?seed=photos starts today with six sample photos, so the photo flow can be shown without a photo library */
 const SEED = Platform.OS === 'web' && typeof location !== 'undefined' && location.search.includes('seed=photos')
   ? ['cafe', 'latte', 'sunset', 'osmanthus', 'noodles', 'hotpot'].map((k) => ({ asset: PHOTO[k] })) : [];
@@ -97,6 +99,7 @@ export default function App() {
   const [indent, setIndentState] = useState(false);    // first-line indent on the page
   const [where, setWhereState] = useState(false);      // record where each day was written
   const [font, setFontState] = useState<FontKey>('song');   // the Chinese face of the whole app
+  const [names, setNamesState] = useState<Name[]>([]);     // the people the writer names, spelled their way (src/names.ts)
   const { face: cnFace, fetching: fontFetching } = useChineseFace(font);
   const [pane, setPane] = useState<Pane>(null);
   const [today, setToday] = useState(() => dayKey());
@@ -120,7 +123,8 @@ export default function App() {
   const via = useRef<'live' | 'audio'>('audio');      // which one is recording: Apple's recogniser, or expo-audio
 
   useEffect(() => {
-    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice', 'qd-indent', 'qd-place', 'qd-font']).then((kv) => {
+    AsyncStorage.multiGet(['qd-mode', 'qd-lang', 'qd-grammar', 'qd-voice', 'qd-indent', 'qd-place', 'qd-font', 'qd-names']).then((kv) => {
+      try { const nm = JSON.parse(kv[7][1] ?? '[]'); if (Array.isArray(nm)) setNamesState(nm); } catch { /* none kept yet */ }
       const f = kv[6][1] as FontKey; if (FONT_KEYS.includes(f)) setFontState(f);
       if (kv[5][1] === '1') setWhereState(true);
       if (kv[4][1] === '1') setIndentState(true);
@@ -134,6 +138,7 @@ export default function App() {
   const setLang = (l: Lang) => { setLangState(l); AsyncStorage.setItem('qd-lang', l).catch(() => {}); };
   const setGrammar = (g: boolean) => { setGrammarState(g); AsyncStorage.setItem('qd-grammar', g ? '1' : '0').catch(() => {}); };
   const setVoice = (v: boolean) => { setVoiceState(v); AsyncStorage.setItem('qd-voice', v ? '1' : '0').catch(() => {}); };
+  const setNames = (list: Name[]) => { setNamesState(list); AsyncStorage.setItem('qd-names', JSON.stringify(list)).catch(() => {}); };
   const setFont = (f: FontKey) => { setFontState(f); AsyncStorage.setItem('qd-font', f).catch(() => {}); };
   const setIndent = (v: boolean) => { setIndentState(v); AsyncStorage.setItem('qd-indent', v ? '1' : '0').catch(() => {}); };
   /* turning "Record where you write" on asks for location once; without it the setting stays off */
@@ -314,7 +319,7 @@ export default function App() {
   async function pick() {
     const key = cur;
     try {
-      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, orderedSelection: true, selectionLimit: 60, quality: 0.7 });
+      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: true, orderedSelection: true, selectionLimit: 60, quality: 0.7 });
       if (r.canceled || !r.assets.length) return;
       const kept = await Promise.all(r.assets.map(keepShaped));
       update(key, (d) => ({ ...d, photos: [...d.photos, ...kept] }));
@@ -327,7 +332,7 @@ export default function App() {
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) { setNotice({ text: S.cameraDenied, action: settings }); return; }
-      const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 });
+      const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images', 'videos'], quality: 0.7 });
       if (r.canceled || !r.assets.length) return;
       const kept = await keepShaped(r.assets[0]);
       update(key, (d) => ({ ...d, photos: [...d.photos, kept] }));
@@ -385,6 +390,21 @@ export default function App() {
     const id = 's' + Date.now().toString(36);
     update(cur, (d) => ({ ...d, stickers: [...(d.stickers ?? []), { id, s: sk, p: -1, ...at, wrap: true }] }));
     setSlap(id);
+  }
+  /* a place goes onto the page where the person is looking, and moves, resizes and peels off like a photo; changing it
+     between a card and a chip lets it take that shape's own size again */
+  function addPin(pin: Pin, at: Pos) {
+    const id = 'p' + Date.now().toString(36);
+    update(cur, (d) => ({ ...d, placed: [...(d.placed ?? []), { id, idx: [], pin }], moved: { ...d.moved, [id]: at } }));
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }
+  function changePin(id: string, pin: Pin) {
+    update(cur, (d) => {
+      const was = d.placed?.find((p) => p.id === id);
+      const moved = { ...d.moved };
+      if (was?.pin && was.pin.look !== pin.look && moved[id]) { const { w: _w, ...rest } = moved[id]; moved[id] = rest; }
+      return { ...d, placed: (d.placed ?? []).map((p) => (p.id === id ? { ...p, pin } : p)), moved };
+    });
   }
   function moveSticker(id: string, at: Partial<Sticker> | null) {
     update(cur, (d) => ({ ...d, stickers: at ? (d.stickers ?? []).map((st) => (st.id === id ? { ...st, ...at } : st)) : (d.stickers ?? []).filter((st) => st.id !== id) }));
@@ -485,7 +505,7 @@ export default function App() {
     /* the rest goes to the first day */
     const f = built[first], map = new Map<number, number>();
     d.photos.forEach((p, i) => { if (!used.has(i)) { map.set(i, f.photos.length); f.photos.push(p); } });
-    f.placed = (d.placed ?? []).map((p) => ({ ...p, idx: p.idx.filter((i) => map.has(i)).map((i) => map.get(i)!) })).filter((p) => p.idx.length);
+    f.placed = (d.placed ?? []).map((p) => ({ ...p, idx: p.idx.filter((i) => map.has(i)).map((i) => map.get(i)!) })).filter((p) => p.idx.length || p.pin);
     f.moved = { ...f.moved, ...Object.fromEntries(Object.entries(d.moved ?? {}).filter(([k]) => k.startsWith('p'))) };
     f.groups = d.groups.filter((g) => g.every((i) => map.has(i))).map((g) => g.map((i) => map.get(i)!));
     f.stickers = d.stickers;
@@ -535,7 +555,7 @@ export default function App() {
     const key = cur, d0 = day;
     setMaking(true);
     const wait = new Promise((r) => setTimeout(r, 2000));
-    const fixOne = (t: string) => (t.trim() ? fixText(t, true).catch(() => t) : Promise.resolve(t));
+    const fixOne = (t: string) => (t.trim() ? fixText(t, true, names).catch(() => t) : Promise.resolve(t));
     const said0 = d0.said.filter((x) => x.kind !== 'head' || !!x.day);   // time headings are found again each time; a day's heading stays
     const items: Said[] = agentOn && grammar
       ? await Promise.all(said0.map(async (x): Promise<Said> => (x.kind === 'head' || x.g ? x : x.kind === 'talk'
@@ -592,7 +612,7 @@ export default function App() {
      In the installed app, Apple's recogniser records and shows the words live; in Expo Go, expo-audio records. */
   const rec = {
     start: async () => {
-      if (live.on && await live.start(lang)) { via.current = 'live'; busy.current = true; return true; }
+      if (live.on && await live.start(lang, names.map((n) => n.name))) { via.current = 'live'; busy.current = true; return true; }
       via.current = 'audio';
       try {
         const p = await requestRecordingPermissionsAsync();
@@ -674,12 +694,12 @@ export default function App() {
                   ownTitle={day.title ?? ''} onRename={entry ? undefined : (text: string) => update(cur, (d) => ({ ...d, title: text.trim() || undefined }))}
                   photos={day.photos} groups={day.groups} setGroups={(g) => update(cur, (d) => ({ ...d, groups: g }))}
                   onRemove={(idx) => { setPast((m) => ({ ...m, [cur]: [] })); update(cur, (d) => removePhotos(d, idx)); }}
-                  said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} voice={voice} indent={indent} onCamera={camera} onPick={pick} onOpen={setPane} onRecord={rec}
+                  said={day.said} laid={day.laid} making={making} live={live.text} grammar={grammar} names={names} onName={(n) => { setNames(addName(names, n)); setNotice({ text: S.nameSaved(n.name) }); }} voice={voice} indent={indent} onCamera={camera} onPick={pick} onOpen={setPane} onRecord={rec}
                   onSaved={(x) => { update(cur, (d) => ({ ...d, said: [...d.said, x] })); grow(cur); note(cur); }} onLayout={layout} onUndo={past[cur]?.length ? undo : undefined} onMerge={mergeUp} onNotice={setNotice}
                   placed={day.placed} moved={day.moved} onText={editText}
                   onPlace={placePhoto} onOffPage={offPage} onReorder={moveItem}
                   onMove={(key, at) => update(cur, (d) => ({ ...d, moved: { ...d.moved, [key]: at } }))}
-                  stickers={day.stickers} slap={slap} mine={mine} onAddSticker={addSticker} onSticker={moveSticker} onMakeSticker={makeSticker} onPhoto={onPhoto} />
+                  stickers={day.stickers} slap={slap} mine={mine} onAddSticker={addSticker} onAddPin={addPin} onPin={changePin} onSticker={moveSticker} onMakeSticker={makeSticker} onPhoto={onPhoto} />
                 )}
                 {menu ? <DayMenu days={menuDays} rows={menuRows} more={menuMore} cur={curKey === 'week' ? 'week' : curKey} onClose={() => setMenu(false)}
                   onPick={(k) => { setMenu(false); if (k === 'combine') setRanging(true); else if (k === 'split') split(cur); else setCur(k); }} /> : null}
@@ -687,7 +707,7 @@ export default function App() {
                 <Archive open={pane === 'archive'} onClose={() => setPane(null)} onEntry={openEntry} onInsights={() => setPane('insights')}
                   has={(k) => !!(days[k]?.said.length || days[k]?.photos.length)} onDay={(k) => { setCur(k); setPane(null); }} />
                 <Insights open={pane === 'insights'} onClose={() => setPane('archive')} />
-                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} font={font} setFont={setFont} fontFetching={fontFetching} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} where={where} setWhere={setWhere} />
+                <Settings open={pane === 'settings'} onClose={() => setPane(null)} mode={mode} setMode={setMode} lang={lang} setLang={setLang} font={font} setFont={setFont} fontFetching={fontFetching} names={names} setNames={setNames} grammar={grammar} setGrammar={setGrammar} voice={voice} setVoice={setVoice} indent={indent} setIndent={setIndent} where={where} setWhere={setWhere} />
                 <Toast notice={notice} onClose={closeNotice} />
               </>
             )}

@@ -56,7 +56,7 @@ export function useLive(onStop: (code: string) => void) {
   }, []);
 
   /* false when Apple's recogniser can't be used (no permission, or not available); the caller then records with expo-audio */
-  async function start(lang: 'zh' | 'en') {
+  async function start(lang: 'zh' | 'en', names: string[] = []) {
     if (!mod) return false;
     const M = mod.ExpoSpeechRecognitionModule;
     try {
@@ -70,6 +70,7 @@ export function useLive(onStop: (code: string) => void) {
     M.start({
       lang: lang === 'zh' ? 'zh-CN' : 'en-US',
       interimResults: true, continuous: true, addsPunctuation: true, iosTaskHint: 'dictation',
+      contextualStrings: names,                    // the names the person keeps, so they are heard right
       requiresOnDeviceRecognition: true,           // applied where the phone supports it; then no audio goes to Apple
       recordingOptions: { persist: true, outputDirectory: new Directory(Paths.document, 'audio').uri, outputSampleRate: 16000, outputEncoding: 'pcmFormatInt16' },
     });

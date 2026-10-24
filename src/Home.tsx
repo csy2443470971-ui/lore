@@ -9,10 +9,13 @@ import Re, { Easing, useAnimatedStyle, useSharedValue, withSpring, withTiming } 
 import { Fluid, isCJK, LATIN, mixed, Page, PageApi, pieces, shapeOf, soloFor, Stream } from './Doc';
 import { ShareSheet } from './Share';
 import { StickerBox } from './StickerBox';
+import { PlaceBox, pinSize } from './PlaceBox';
+import { mapsFor, openPin, Pin } from './places';
 import { Viewer } from './Viewer';
 import { Lift, src, Tray } from './Photos';
 import { agentOn, Heard, marked, transcribe } from './agent';
 import { Pic, Placed, Pos, Said, Sticker, Unit, unitsOf } from './session';
+import { applyNames, Name, nameFrom } from './names';
 import { keepRecording } from './store';
 import { F, SZ } from './theme';
 import { Glow, Notice, RecState, Round, TalkKey, Text, TextInput, useCn, useFace, useLang, useS, useT, useTimer } from './ui';
@@ -21,7 +24,7 @@ type Rect = { x: number; y: number; w: number; h: number };
 
 /* The one writing page. Empty, with photos, or carrying on later, it is the same page:
    today's photos (if any), what has been laid out, the tidied words not laid out yet, and the talk row. */
-export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRename, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, onPlace, onMove, onOffPage, onReorder, onLayout, onUndo, onMerge, onNotice, stickers, slap, mine, onAddSticker, onSticker, onMakeSticker, onPhoto }: {
+export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRename, pageTitle, pageMeta, onToday, photos, groups, setGroups, onRemove, said, laid, placed, moved, making, live, grammar, voice, indent, onCamera, onPick, onOpen, onRecord, onSaved, onText, names, onName, onPlace, onAddPin, onPin, onMove, onOffPage, onReorder, onLayout, onUndo, onMerge, onNotice, stickers, slap, mine, onAddSticker, onSticker, onMakeSticker, onPhoto }: {
   hidden: boolean; night: boolean;
   day: string;                                      // which day is shown; switching days keeps this screen and swaps only the page
   past: boolean; title: string; pageTitle: string; pageMeta: string; onToday: () => void;   // a past day opens on this same page
@@ -39,6 +42,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   onUndo?: () => void;                               // back to the page as it was before the last lay out, join or edit
   stickers?: Sticker[]; slap?: string; mine: string[];   // the page's stickers, the one just put on, and those made from photos
   onAddSticker: (s: string, at: { x: number; y: number; w: number; r: number }) => void;
+  onAddPin: (pin: Pin, at: Pos) => void; onPin: (id: string, pin: Pin) => void;
   onSticker: (id: string, at: Partial<Sticker> | null) => void;
   onMakeSticker: () => Promise<string | null>;        // a photo picked to trace a sticker from, or null
   /* from the full-screen photo: delete it, set marks into it, go back to the original, or keep a cut-out sticker */
@@ -46,6 +50,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   onMerge: (item: number) => void;                    // join a paragraph to the one above it
   onSaved: (s: Said) => void; onLayout: () => void; onNotice: (n: Notice) => void;
   onText: (item: number, part: number, text: string) => void;   // an edited recording, or an edited photo caption (part)
+  names: Name[]; onName: (n: Name) => void;         // the names the writer keeps, and one chosen in an edit to remember
   onPlace: (idx: number[], at: Pos) => void; onMove: (key: string, at: Pos) => void;
   onOffPage: (key: string) => void;                  // a photo taken off the page (it stays among the thumbnails)
   onReorder: (item: number, before: number) => void;  // a paragraph moved before another item
@@ -79,6 +84,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const [choosing, setChoosing] = useState<Set<string> | null>(null);   // choosing paragraphs and photos for a share image
   const [sharing, setSharing] = useState(false);
   const [stickerBox, setStickerBox] = useState(false);                  // the sticker box is open
+  const [placeBox, setPlaceBox] = useState(false);                      // the place sheet is open
   const [reading, setReading] = useState<string | null>(null);
   /* writing straight onto the page, as in Notes: a tap on empty space puts the cursor at the end of the page; what is
      typed becomes a paragraph of its own when the finger goes elsewhere or Done is pressed */
@@ -93,6 +99,8 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   const [bin, setBin] = useState<'on' | 'over' | null>(null);
   const [binPhoto, setBinPhoto] = useState(false);                     // the bin is for a photo (off the page), not a sticker           // a sticker is being carried: the bin shows in the talk key's place
   const [draft, setDraft] = useState('');
+  const before = useRef('');                                            // the words as they were when the edit began
+  const [picked, setSelRange] = useState({ start: 0, end: 0 });        // what is selected in the edit, for remembering a name
   /* A photo lifted from the thumbnails at the bottom: it is drawn by the screen at the finger (shared values, moved on
      the screen's own thread, so it follows smoothly whatever the page is doing), and tells the page where it is; the page
      makes room, and on a drop says where the photo lands, and the photo glides there. */
@@ -130,7 +138,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   useEffect(() => {
     if (shownDay.current === day) return;
     shownDay.current = day;
-    setK(-1); setLines({}); setSelect(false); setSel([]); setEditing(null); setCarried(null); gop.set(0); held.current = null; setChoosing(null); setSharing(false); setStickerBox(false);
+    setK(-1); setLines({}); setSelect(false); setSel([]); setEditing(null); setCarried(null); gop.set(0); held.current = null; setChoosing(null); setSharing(false); setStickerBox(false); setPlaceBox(false);
     scroll.current?.scrollTo({ y: 0, animated: false });
     turn.setValue(0.25);
     Animated.timing(turn, { toValue: 1, duration: 200, useNativeDriver: true }).start();
@@ -150,7 +158,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
   /* on the phone: keep the recording, then send it; the raw words come back with the removed ones struck through, then settle */
   function send(uri: string, took = 0) {
     setReal('tidy');
-    keepRecording(uri).then((kept) => transcribe(kept, grammar).then((r) => {
+    keepRecording(uri).then((kept) => transcribe(kept, grammar, names).then((r) => {
       if (!r.text.trim()) { setReal('idle'); onNotice({ text: S.heardNothing }); return; }
       setHeard(r); setReal('show');
       setTimeout(() => { onSaved({ kind: 'talk', text: r.text, audio: kept, g: grammar, at: Date.now() - took * 1000, secs: Math.round(took) }); setReal('idle'); setHeard(null); }, 1500);
@@ -237,6 +245,8 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
     const x = said[item];
     if (!x || x.kind === 'head' || recording || making || select || carried) return;
     setDraft(x.kind === 'talk' ? x.text : x.parts[part]?.text ?? '');
+    before.current = x.kind === 'talk' ? x.text : x.parts[part]?.text ?? '';
+    setSelRange({ start: 0, end: 0 });
     setEditing({ item, part });
   }
   function saveEdit() {
@@ -409,6 +419,30 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
     if (!area.current) { place(40); return; }
     area.current.measureInWindow((_x, ay) => place(top + 50 + 80 + Math.random() * 60 - ay));
   };
+  /* a place goes in at the right of where the person is looking */
+  const putPin = (pin: Pin) => {
+    setPlaceBox(false);
+    const pw = W - 2 * SZ.px, { w } = pinSize(pin, pw);
+    const at = (y: number) => onAddPin(pin, { x: pw - w, y: Math.max(0, Math.round(y)), w });
+    if (!area.current) { at(40); return; }
+    area.current.measureInWindow((_x, ay) => at(top + 50 + 90 - ay));
+  };
+  /* a tapped place: open it in its map, change how it shows, or take it off */
+  const pinMenu = (id: string) => {
+    const pin = placed?.find((p) => p.id === id)?.pin;
+    if (!pin) return;
+    const opts = [S.placeOpen, pin.look === 'card' ? S.placeToChip : S.placeToCard, S.del, S.cancel];
+    const pick = async (b: number) => {
+      if (b === 0) openPin(pin);
+      else if (b === 1) {
+        const look = pin.look === 'card' ? 'chip' : 'card';
+        onPin(id, { ...pin, look, map: look === 'card' && !pin.map ? await mapsFor(pin) : pin.map });
+      } else if (b === 2) onOffPage(id);
+    };
+    if (Platform.OS === 'ios') ActionSheetIOS.showActionSheetWithOptions({ options: opts, cancelButtonIndex: 3, destructiveButtonIndex: 2, title: pin.name }, pick);
+    else if (Platform.OS === 'web') pick(0);
+    else Alert.alert(pin.name, '', opts.map((o, b) => ({ text: o, onPress: () => pick(b), style: b === 3 ? 'cancel' : undefined })));
+  };
   const makeSticker = async () => { setStickerBox(false); const uri = await onMakeSticker(); if (uri) setViewing({ idx: [], at: 0, pics: [{ uri }], only: 'cut' }); };
   useEffect(() => { if (typing !== null) setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 120); }, [typing === null, kb]);   // eslint-disable-line react-hooks/exhaustive-deps
   /* what was typed becomes a paragraph of its own (not laid out until the page is) */
@@ -474,7 +508,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
             api={pageApi} onEdge={onEdge} onPreview={onPreview} voice={voice} indent={indent} onRename={recording ? undefined : onRename} ownTitle={ownTitle}
             onDrag={setDragging} onMove={onMove} onEdit={edit}
             onMerge={recording ? undefined : onMerge} onShare={(item) => setChoosing(new Set([`t${item}`]))} onSelect={setReading}
-            onOpen={(idx) => setViewing({ idx, at: 0 })}
+            onOpen={(idx) => setViewing({ idx, at: 0 })} onPin={pinMenu}
             chosen={choosing ?? undefined} onChoose={choosing ? choose : undefined}
             stickers={stickers} slap={slap} onSticker={onSticker} bin={binAt} scroll={scroll} onStickerDrag={(s) => { setBinPhoto(false); setBin(s); }}
             onPhotoBin={(s) => { setBinPhoto(true); setBin(s); }} onRemove={onOffPage} onReorder={recording ? undefined : onReorder} /> : null}
@@ -484,7 +518,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           {unlaid.length ? <Stream items={unlaid} onEdit={(i, part) => edit(laid + i, part)} /> : null}
 
           {livePhotos && reached.length ? <Stream items={[{ kind: 'photos', parts: reached.map((n) => ({ unit: units[n], text: lines[n] || line(n), spoken: spoken(units[n], lines[n] || line(n)) })) }]} /> : null}
-          {(real === 'listen' || real === 'tidy') && live ? <Text style={tx}>{mixed(live, h.tx.fontSize, cn.body)}</Text> : null}
+          {(real === 'listen' || real === 'tidy') && live ? <Text style={tx}>{mixed(applyNames(live, names), h.tx.fontSize, cn.body)}</Text> : null}
           {real === 'tidy' ? <Text style={[h.hint, { color: t.mut, fontFamily: face.body }]}>✦ {S.cleaning}</Text> : null}
           {real === 'show' && heard ? (
             <Text style={tx}>
@@ -567,6 +601,10 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
               <Text style={[h.relayoutHint, { color: t.mut, fontFamily: face.body }]}>{S.stickers}</Text>
               <Round icon="sticker" label={S.stickers} onPress={() => setStickerBox(true)} />
             </View>
+            <View style={h.againOne}>
+              <Text style={[h.relayoutHint, { color: t.mut, fontFamily: face.body }]}>{S.placeBtn}</Text>
+              <Round icon="pin" label={S.placeBtn} onPress={() => setPlaceBox(true)} />
+            </View>
           </View>
         </View>
       ) : null}
@@ -607,6 +645,7 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
       ) : null}
 
       {stickerBox ? <StickerBox mine={mine} onPick={putSticker} onMake={makeSticker} onClose={() => setStickerBox(false)} /> : null}
+      {placeBox ? <PlaceBox onPick={putPin} onClose={() => setPlaceBox(false)} /> : null}
       {sharing && choosing ? (() => {
         const { paras, tiles } = pieces(said.slice(0, laid), photos, placed);
         return (
@@ -644,10 +683,19 @@ export function Home({ day, hidden, night, past, title, onTitle, ownTitle, onRen
           <View style={[h.sheet, { backgroundColor: t.b, paddingBottom: 16 }]}>
             <View style={h.sheetBar}>
               <Pressable hitSlop={10} onPress={() => setEditing(null)}><Text style={{ fontSize: 15, color: t.mut }}>{S.cancel}</Text></Pressable>
+              {/* a name selected in the words: remember it (with how it read before), so recordings spell it right */}
+              <Pressable hitSlop={8} disabled={picked.end <= picked.start} onPress={() => {
+                const n = nameFrom(before.current, draft, picked.start, picked.end);
+                if (n) onName(n);
+              }} style={({ pressed }) => [h.nameBtn, { backgroundColor: t.panel, opacity: picked.end <= picked.start ? 0.35 : pressed ? 0.6 : 1 }]}>
+                <Text style={{ fontSize: 13, color: t.ink }}>{S.rememberName}</Text>
+              </Pressable>
               <Pressable hitSlop={10} onPress={saveEdit}><Text style={{ fontSize: 15, color: t.ink, fontWeight: '600' }}>{S.editDone}</Text></Pressable>
             </View>
             <TextInput value={draft} onChangeText={setDraft} multiline autoFocus selectionColor={t.red}
+              onSelectionChange={(e) => setSelRange(e.nativeEvent.selection)}
               style={[h.tx, h.input, { color: t.ink }, inFace(draft)]} />
+            <Text style={[h.nameHint, { color: t.mut }]}>{S.nameHint}</Text>
           </View>
         </KeyboardAvoidingView>
       ) : null}
@@ -685,6 +733,8 @@ const h = StyleSheet.create({
   ctl: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'flex-start' },
   selRow: { flexDirection: 'row', gap: 10, alignItems: 'center', marginTop: (SZ.talk - SZ.key) / 2 },
   carry: { position: 'absolute', shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 14, shadowOffset: { width: 0, height: 8 } },
+  nameBtn: { height: 30, paddingHorizontal: 14, borderRadius: 15, justifyContent: 'center' },
+  nameHint: { fontSize: 12, marginTop: 2 },
   editWrap: { justifyContent: 'flex-end' },
   sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: SZ.px, paddingTop: 14, gap: 6 },
   sheetBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 4 },

@@ -1,3 +1,4 @@
+import { applyNames, Name, vocabulary } from './names';
 import { Platform } from 'react-native';
 import { File } from 'expo-file-system';
 
@@ -13,18 +14,20 @@ export type Heard = { raw: string; text: string; tidied?: string; via: string };
 
 /* send one recording: it comes back as the raw transcript and the tidied text.
    The audio travels as base64 in JSON: the multipart file convention ({ uri, name, type }) is not understood by every fetch. */
-export async function transcribe(uri: string, grammar = true): Promise<Heard> {
+export async function transcribe(uri: string, grammar = true, names: Name[] = []): Promise<Heard> {
   const audio = await new File(uri).base64();
   const r = await fetch(`${URL}/transcribe`, {
     method: 'POST',
     headers: { 'x-lore-key': KEY, 'content-type': 'application/json' },
-    body: JSON.stringify({ audio, mime: uri.endsWith('.wav') ? 'audio/wav' : 'audio/mp4', grammar }),
+    body: JSON.stringify({ audio, mime: uri.endsWith('.wav') ? 'audio/wav' : 'audio/mp4', grammar, vocabulary: vocabulary(names), names: names.map((n) => n.name) }),
   });
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
     throw new Error(`${r.status}${j.error ? ' ' + j.error : ''}`);
   }
-  return r.json();
+  /* the names the person keeps are written their way, however they were heard */
+  const out: Heard = await r.json();
+  return { ...out, text: applyNames(out.text, names), tidied: out.tidied && applyNames(out.tidied, names) };
 }
 
 /* one finished stretch of speech, tidied while the person is still talking: fillers out, nothing else */
@@ -35,10 +38,10 @@ export async function tidyText(text: string): Promise<string> {
 }
 
 /* words already on the phone, corrected once when a day is laid out again: misheard words and, with grammar on, grammar */
-export async function fixText(text: string, grammar: boolean): Promise<string> {
-  const r = await fetch(`${URL}/fix`, { method: 'POST', headers: { 'x-lore-key': KEY, 'content-type': 'application/json' }, body: JSON.stringify({ text, grammar }) });
+export async function fixText(text: string, grammar: boolean, names: Name[] = []): Promise<string> {
+  const r = await fetch(`${URL}/fix`, { method: 'POST', headers: { 'x-lore-key': KEY, 'content-type': 'application/json' }, body: JSON.stringify({ text: applyNames(text, names), grammar, names: names.map((n) => n.name) }) });
   if (!r.ok) throw new Error(String(r.status));
-  return (await r.json()).text;
+  return applyNames((await r.json()).text, names);
 }
 
 /* the time-heading node: which of the day's sentences start a new time of day, and the heading for each */

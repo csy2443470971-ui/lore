@@ -10,7 +10,8 @@ import { Ent, Kind, Lang, MONTH_MIN } from './data';
 import { PHOTO } from './images';
 import { F, SZ } from './theme';
 import { FONT_KEYS, FontKey } from './fonts';
-import { Icon, Meta, Panel, Round, s as us, Text, useFace, useLang, useS, useT } from './ui';
+import { Icon, Meta, Panel, Round, s as us, Text, TextInput, useFace, useLang, useS, useT } from './ui';
+import { Name } from './names';
 
 type Mode = 'light' | 'dark' | 'auto';
 
@@ -282,6 +283,40 @@ function Seg<V extends string>({ value, options, onChange }: { value: V; options
     </View>
   );
 }
+/* The names kept for recordings, each a chip: a tap turns it into a field right there to change it (emptied, it goes);
+   the last chip adds one. Under a name, small, the ways it was heard wrong. */
+function NamesEdit({ names, setNames }: { names: Name[]; setNames: (list: Name[]) => void }) {
+  const t = useT();
+  const S = useS();
+  const [editing, setEditing] = useState<number | null>(null);   // which name is being changed; -1 a new one
+  const [text, setText] = useState('');
+  const done = () => {
+    const v = text.trim();
+    if (editing === -1) { if (v && !names.some((n) => n.name === v)) setNames([...names, { name: v, heard: [] }]); }
+    else if (editing !== null) setNames(v ? names.map((n, i) => (i === editing ? { ...n, name: v } : n)) : names.filter((_, i) => i !== editing));
+    setEditing(null); setText('');
+  };
+  const field = (
+    <TextInput key="field" value={text} onChangeText={setText} autoFocus returnKeyType="done" onSubmitEditing={done} onBlur={done}
+      placeholder={S.addName} placeholderTextColor={t.mut} selectionColor={t.red} style={[a.nameChip, a.nameField, { color: t.ink, borderColor: t.ink }]} />
+  );
+  return (
+    <View style={a.names}>
+      {names.map((n, i) => (editing === i ? field : (
+        <Pressable key={n.name} onPress={() => { setEditing(i); setText(n.name); }} style={({ pressed }) => [a.nameChip, { backgroundColor: t.gray, opacity: pressed ? 0.6 : 1 }]}>
+          <Text style={{ fontSize: 14, color: t.ink }}>{n.name}</Text>
+          {n.heard.length ? <Text style={{ fontSize: 10.5, color: t.mut }}>{S.heardAs} {n.heard.slice(0, 2).join('、')}</Text> : null}
+        </Pressable>
+      )))}
+      {editing === -1 ? field : (
+        <Pressable onPress={() => { setEditing(-1); setText(''); }} style={({ pressed }) => [a.nameChip, a.nameAdd, { borderColor: t.mut, opacity: pressed ? 0.6 : 1 }]}>
+          <Text style={{ fontSize: 13.5, color: t.mut }}>+ {S.addName}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 function Row({ k, sub, children, extra }: { k: string; sub: string; children?: React.ReactNode; extra?: React.ReactNode }) {
   const t = useT();
   return (
@@ -343,8 +378,9 @@ function Reminders() {
   return <Row k={S.sRemind} sub={S.sRemindSub} extra={<Seg value={r} onChange={setR} options={[['night', S.rNight], ['week', S.rWeek], ['off', S.rOff]]} />} />;
 }
 
-export function Settings({ open, onClose, mode, setMode, lang, setLang, font, setFont, fontFetching, grammar, setGrammar, voice, setVoice, indent, setIndent, where, setWhere }: {
+export function Settings({ open, onClose, mode, setMode, lang, setLang, font, setFont, fontFetching, names, setNames, grammar, setGrammar, voice, setVoice, indent, setIndent, where, setWhere }: {
   font: FontKey; setFont: (f: FontKey) => void; fontFetching: boolean;
+  names: Name[]; setNames: (list: Name[]) => void;   // the names recordings should spell right
   open: boolean; onClose: () => void; mode: Mode; setMode: (m: Mode) => void; lang: Lang; setLang: (l: Lang) => void;
   grammar: boolean; setGrammar: (g: boolean) => void; voice: boolean; setVoice: (v: boolean) => void;
   indent: boolean; setIndent: (v: boolean) => void;
@@ -362,6 +398,7 @@ export function Settings({ open, onClose, mode, setMode, lang, setLang, font, se
         <Row k={S.sLang} sub={S.sLangSub} extra={<Seg value={lang} onChange={setLang} options={[['zh', '中文'], ['en', 'English']]} />} />
         <Row k={S.sFont} sub={fontFetching ? S.fontFetching : S.sFontSub} extra={<Seg value={font} onChange={setFont} options={FONT_KEYS.map((f) => [f, S.fontNames[f]] as [FontKey, string])} />} />
         <WritingStyle grammar={grammar} setGrammar={setGrammar} />
+        <Row k={S.sNames} sub={S.sNamesSub} extra={<NamesEdit names={names} setNames={setNames} />} />
         <Row k={S.sVoice} sub={S.sVoiceSub}><Toggle key={String(voice)} on={voice} onChange={setVoice} /></Row>
         <Row k={S.sIndent} sub={S.sIndentSub}><Toggle key={String(indent)} on={indent} onChange={setIndent} /></Row>
         <Row k={S.sPlace} sub={S.sPlaceSub}><Toggle key={String(where)} on={where} onChange={setWhere} /></Row>
@@ -381,6 +418,10 @@ const a = StyleSheet.create({
   hBtn: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   caret: { fontSize: 12 },
   pick: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 18 },
+  names: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  nameChip: { minHeight: 34, paddingHorizontal: 13, paddingVertical: 5, borderRadius: 17, justifyContent: 'center' },
+  nameField: { minWidth: 110, borderWidth: 1, fontSize: 14, paddingVertical: 0 },
+  nameAdd: { borderWidth: 1, borderStyle: 'dashed' },
   yearMenu: { position: 'absolute', right: -6, top: 30, width: 112, borderRadius: 14, paddingVertical: 6, shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
   yearRow: { height: 38, paddingHorizontal: 16, justifyContent: 'center' },
   pickCell: { width: '33.333%', height: 52, alignItems: 'center', justifyContent: 'center' },
