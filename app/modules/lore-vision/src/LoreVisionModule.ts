@@ -8,6 +8,9 @@ declare class LoreVisionModule extends NativeModule<{}> {
   /* fonts Apple offers to download (by PostScript name); only in the newer app */
   fontReady?(name: string): boolean;
   fetchFont?(names: string[]): Promise<boolean>;
+  /* places from Apple Maps, and a small map of one with its pin (a PNG file); only in the newer app */
+  searchPlaces?(query: string, lat?: number | null, lng?: number | null): Promise<{ name: string; address?: string; lat: number; lng: number }[]>;
+  mapSnapshot?(lat: number, lng: number, w: number, h: number, dark: boolean): Promise<string>;
 }
 
 /* optional: an app installed before this module existed still runs the same JS update, just without it */

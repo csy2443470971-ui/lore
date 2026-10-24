@@ -300,6 +300,7 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
     </View>
   );
   const drawing = mode === 'pen' || mode === 'cut';
+  const clip = pic.video?.uri;                             // a video: it plays, and the only tool is delete
 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: DIM, zIndex: 40 }]}>
@@ -310,13 +311,14 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
         <Text style={v.count}>{pics.length > 1 ? `${at + 1} / ${pics.length}` : ''}</Text>
         {edited ? (
           <Pressable onPress={save} disabled={busy} hitSlop={10} style={v.barBtn}><Text style={[v.barT, { fontWeight: '600', textAlign: 'right' }]}>{S.editDone}</Text></Pressable>
-        ) : pic.orig && !only ? (
+        ) : pic.orig && !only && !clip ? (
           <Pressable onPress={() => onRestore(at)} hitSlop={10} style={v.barBtn}><Text style={[v.barT, { textAlign: 'right' }]}>{S.restore}</Text></Pressable>
         ) : <View style={v.barBtn} />}
       </View>
 
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        {mode === 'view' && !edited ? (
+        {clip ? <Clip key={clip} uri={clip} w={fw} h={fh} still={canvas(true, frame)} />
+          : mode === 'view' && !edited ? (
           <GestureDetector gesture={look}><Re.View style={zoomed}>{canvas(true, frame)}</Re.View></GestureDetector>
         ) : drawing && !cut ? (
           <GestureDetector gesture={draw}><View>{canvas(true, frame)}</View></GestureDetector>
@@ -350,6 +352,7 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
           {pics.map((p, i) => (
             <Pressable key={i} onPress={() => setAt(i)} style={[v.thumb, i === at && { borderColor: INK }]}>
               <Image source={src(p)} contentFit="cover" style={StyleSheet.absoluteFill} />
+              {p.video ? <View style={v.thumbPlay}><Svg width={7} height={8} viewBox="0 0 8 9"><Path d="M1 0.8v7.4c0 .5.5.8.9.5l5.6-3.7c.4-.2.4-.8 0-1L1.9.3C1.5 0 1 .3 1 .8z" fill="#fff" /></Svg></View> : null}
             </Pressable>
           ))}
         </View>
@@ -384,7 +387,11 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
               </>
             ) : null}
       </View>
-      {only ? <View style={{ height: ins.bottom + 20 }} /> : (
+      {only ? <View style={{ height: ins.bottom + 20 }} /> : clip ? (
+        <View style={[v.tools, { paddingBottom: ins.bottom + 14 }]}>
+          {tool(S.del, () => setMode(mode === 'delete' ? 'view' : 'delete'), mode === 'delete')}
+        </View>
+      ) : (
         <View style={[v.tools, { paddingBottom: ins.bottom + 14 }]}>
           {tool(S.pen, () => setMode(mode === 'pen' ? 'view' : 'pen'), mode === 'pen')}
           {tool(S.stickers, () => setBox(true), mode === 'deco')}
@@ -406,6 +413,23 @@ export function Viewer({ pics, start, mine, only, onClose, onDelete, onSave, onR
   );
 }
 
+/* A video, playing with the system's own controls. expo-video is native: an app installed before it was added shows the
+   first frame and says so. */
+type EV = typeof import('expo-video');
+const ev: EV | null = (() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- loaded only where the native side is there
+  try { return require('expo-video') as EV; } catch { return null; }
+})();
+function Clip({ uri, w, h, still }: { uri: string; w: number; h: number; still: React.ReactNode }) {
+  const S = useS();
+  if (!ev) return <View>{still}<Text style={v.hint}>{S.videoNeedsApp}</Text></View>;
+  return <Playing ev={ev} uri={uri} w={w} h={h} />;
+}
+function Playing({ ev, uri, w, h }: { ev: EV; uri: string; w: number; h: number }) {
+  const player = ev.useVideoPlayer({ uri }, (p) => { p.loop = true; p.play(); });
+  return <ev.VideoView player={player} style={{ width: w, height: h, backgroundColor: DIM }} contentFit="contain" nativeControls />;
+}
+
 /* a cut-out pops off the photo */
 function Popped({ children }: { children: React.ReactNode }) {
   const s = useSharedValue(0.4);
@@ -424,6 +448,7 @@ const v = StyleSheet.create({
   popShadow: { shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 22, shadowOffset: { width: 0, height: 12 } },
   thumbs: { flexDirection: 'row', justifyContent: 'center', gap: 8, paddingVertical: 8 },
   thumb: { width: 44, height: 44, borderRadius: 8, overflow: 'hidden', borderWidth: 2, borderColor: 'transparent' },
+  thumbPlay: { position: 'absolute', right: 3, bottom: 3, width: 15, height: 15, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
   palette: { minHeight: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 16 },
   tools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingTop: 6, paddingHorizontal: 12 },
   tool: { height: 38, paddingHorizontal: 14, borderRadius: 19, backgroundColor: PANEL, justifyContent: 'center' },

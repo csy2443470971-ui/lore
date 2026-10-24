@@ -12,7 +12,7 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "按住红点说话时，用麦克风录下你的声音。"
       },
-      "runtimeVersion": "lore-2",
+      "runtimeVersion": "lore-3",
       "appleTeamId": "N9M5D75C74"
     },
     "android": {
@@ -77,7 +77,8 @@
         {
           "locationWhenInUsePermission": "打开“记录写作地点”后，每天第一次写的时候记下你在哪个街区或城市，写在日期旁边。"
         }
-      ]
+      ],
+      "expo-video"
     ],
     "extra": {
       "eas": {

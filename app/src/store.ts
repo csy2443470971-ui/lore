@@ -44,6 +44,29 @@ export async function keepPhoto(uri: string): Promise<Pic> {
   }
 }
 
+/* a picked video: the file goes into Documents/videos, and its first frame, kept like a photo, is what shows on the
+   page (expo-video-thumbnails is native: an app installed before it was added keeps the video without a picture) */
+export async function keepVideo(uri: string, secs?: number): Promise<Pic> {
+  let video: Pic['video'] = { uri, secs };
+  if (native) {
+    try {
+      const ext = (uri.match(/\.(\w+)$/)?.[1] ?? 'mov').toLowerCase();
+      const n = name(ext);
+      const dest = new File(folder('videos'), n);
+      await new File(uri).copy(dest);
+      video = { uri: dest.uri, file: `videos/${n}`, secs };
+    } catch { /* still shown, though the system may clear it later */ }
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- loaded only where the native side is there
+    const VT = require('expo-video-thumbnails') as typeof import('expo-video-thumbnails');
+    const frame = await VT.getThumbnailAsync(video.uri ?? uri, { time: 0, quality: 0.8 });
+    return { ...(await keepPhoto(frame.uri)), video };
+  } catch {
+    return { video };
+  }
+}
+
 /* a recording lives in the recorder's cache; move it into Documents/audio, so a failed upload really is kept */
 export async function keepRecording(uri: string): Promise<string> {
   if (!native || inside(uri)) return uri;
@@ -56,13 +79,14 @@ export async function keepRecording(uri: string): Promise<string> {
   }
 }
 
-type One = { file?: string; seed?: string; uri?: string; r?: number };
+type One = { file?: string; seed?: string; uri?: string; r?: number; video?: { file?: string; uri?: string; secs?: number } };
 type Stored = { photos?: (One & { orig?: One })[]; groups?: number[][]; said?: Said[]; laid?: number; placed?: Placed[]; moved?: Record<string, Pos>; stickers?: Sticker[]; span?: Day['span']; title?: string; place?: string };
 const seedOf = (asset: number) => Object.keys(PHOTO).find((k) => PHOTO[k] === asset);
 
 /* sample photos are saved by name, since the bundle's asset numbers change between updates */
 function pack(d: Day): string {
-  const one = (p: Pic | NonNullable<Pic['orig']>): One => ({ ...(p.file ? { file: p.file } : p.asset !== undefined ? { seed: seedOf(p.asset) } : { uri: p.uri }), ...(p.r ? { r: p.r } : {}) });
+  const one = (p: Pic | NonNullable<Pic['orig']>): One => ({ ...(p.file ? { file: p.file } : p.asset !== undefined ? { seed: seedOf(p.asset) } : { uri: p.uri }), ...(p.r ? { r: p.r } : {}),
+    ...('video' in p && p.video ? { video: { ...(p.video.file ? { file: p.video.file } : { uri: p.video.uri }), secs: p.video.secs } } : {}) });
   const photos = d.photos.map((p) => ({ ...one(p), ...(p.orig ? { orig: one(p.orig) } : {}) }));
   const rel = (a: string) => inside(a) ?? a;
   const said = d.said.map((x) => (x.kind === 'head' ? x : { ...x, audio: x.audio && rel(x.audio), more: x.more?.map((r) => ({ ...r, audio: rel(r.audio) })) }));
@@ -74,6 +98,7 @@ function unpack(s: string): Day | null {
     const one = (p: One) => ({
       ...(p.file && native ? { file: p.file, uri: new File(Paths.document, p.file).uri }
         : p.seed && PHOTO[p.seed] !== undefined ? { asset: PHOTO[p.seed] } : { uri: p.uri }), ...(p.r ? { r: p.r } : {}),
+      ...(p.video ? { video: { ...(p.video.file && native ? { file: p.video.file, uri: new File(Paths.document, p.video.file).uri } : { uri: p.video.uri }), secs: p.video.secs } } : {}),
     });
     const photos: Pic[] = (j.photos ?? []).map((p) => ({ ...one(p), ...(p.orig ? { orig: one(p.orig) } : {}) }));
     return { photos, groups: j.groups ?? [], said: j.said ?? [], laid: j.laid ?? 0, placed: j.placed, moved: j.moved, stickers: j.stickers, span: j.span, title: j.title, place: j.place };

@@ -13,6 +13,8 @@ import { Pic, Placed, Pos, Said, Sticker } from './session';
 import { stickerSrc } from './stickers';
 import { OUTLINES } from './outlines';
 import { fileUri } from './store';
+import { VideoMark } from './Photos';
+import { PinTile, pinSize } from './PlaceBox';
 import { F, SZ } from './theme';
 import { Text, TextInput, useCn, useS, useT } from './ui';
 
@@ -335,15 +337,19 @@ export const soloFor = (r: number, w: number): Rect => {
 
 /* Photos between two paragraphs sit in rows of up to three, centred: they keep their shapes and the size they had as
    they were carried there, or were given there with two fingers (one height for the row, their sizes' average), smaller
-   only when they wouldn't fit across the page. A photo put between two paragraphs never suddenly grows. */
+   only when they wouldn't fit across the page. A photo put between two paragraphs never suddenly grows. A place (own)
+   keeps its own size and sits on the row's middle. */
 const GT = 6;
-function rowOf(items: { r: number; w?: number }[], W: number) {
-  const sum = items.reduce((a, x) => a + 1 / x.r, 0);
-  const own = items.reduce((a, x) => a + (x.w ? x.w * x.r : soloFor(x.r, W).h), 0) / items.length;
-  const h = Math.round(Math.min(own, (W - GT * (items.length - 1)) / sum));
-  const ws = items.map((x) => Math.round(h / x.r));
+function rowOf(items: { r: number; w?: number; own?: boolean }[], W: number) {
+  const ph = items.filter((x) => !x.own), fixed = items.filter((x) => x.own);
+  const fw = fixed.reduce((a, x) => a + (x.w ?? 0), 0), fh = Math.max(0, ...fixed.map((x) => (x.w ?? 0) * x.r));
+  const sum = ph.reduce((a, x) => a + 1 / x.r, 0);
+  const own = ph.reduce((a, x) => a + (x.w ? x.w * x.r : soloFor(x.r, W).h), 0) / Math.max(1, ph.length);
+  const h = ph.length ? Math.round(Math.min(own, (W - fw - GT * (items.length - 1)) / sum)) : Math.round(fh);
+  const ws = items.map((x) => Math.round(x.own ? x.w ?? 0 : h / x.r));
+  const hs = items.map((x) => (x.own ? Math.min(h, Math.round((x.w ?? 0) * x.r)) : h));
   const total = ws.reduce((a, b) => a + b, 0) + GT * (items.length - 1);
-  return { h, ws, x0: Math.round((W - total) / 2) };
+  return { h, ws, hs, x0: Math.round((W - total) / 2) };
 }
 /* the gap between two paragraphs the finger is in (0 before the first, the count after the last), or -1 when it is on
    the words: the white space between the last line above and the first line below (the heading and time between
@@ -731,8 +737,8 @@ export type PageApi = {
   landing: () => { at: Pos; rect: Rect } | null;                                // where it would land: the place to keep, and its rectangle on the page
   nudge: (dy: number) => void;                                                  // the page scrolled by itself under a photo held on it
 };
-export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onReorder, onRemove, onPhotoBin, voice, indent, onRename, ownTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
-  items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>;
+export function Page({ items, photos, placed, moved, api, onEdge, onPin, onPreview, onReorder, onRemove, onPhotoBin, voice, indent, onRename, ownTitle, title, meta, area, onDrag, onMove, onEdit, onMerge, onShare, onSelect, onOpen, chosen, onChoose, stickers, slap, bin, onSticker, onStickerDrag, locked, scroll }: {
+  items: Said[]; photos: Pic[]; placed?: Placed[]; moved?: Record<string, Pos>; onPin?: (id: string) => void;
   api?: React.MutableRefObject<PageApi | null>;                  // for a photo carried in from the bottom: where it is over the page, and where it would land
   onEdge?: (y: number | null) => void;                           // a photo held on the page: the finger on the screen (so the page can scroll near the edges), null when let go
   onPreview?: (r: (Rect & { row: boolean }) | null) => void;     // where a photo carried in from the bottom would land (on the page), and whether in a row
@@ -834,10 +840,11 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     .onFinalize(() => { two.set({ ...two.get(), on: false }); }), [two]);
   useEffect(() => { if (scroll && Platform.OS !== 'web') second.blocksExternalGesture(scroll as never); }, [second, scroll]);
   /* a tapped tile: its photos by number */
-  const opener = useRef({ items, placed, onOpen });
-  useEffect(() => { opener.current = { items, placed, onOpen }; });
+  const opener = useRef({ items, placed, onOpen, onPin });
+  useEffect(() => { opener.current = { items, placed, onOpen, onPin }; });
   const openTile = useCallback((key: string) => {
-    const { items: its, placed: pl, onOpen: go } = opener.current, m = /^(\d+)-(\d+)$/.exec(key);
+    const { items: its, placed: pl, onOpen: go, onPin: pin } = opener.current, m = /^(\d+)-(\d+)$/.exec(key);
+    if (pl?.find((p) => p.id === key)?.pin) { pin?.(key); return; }
     const x = m ? its[+m[1]] : undefined;
     const idx = m ? (x?.kind === 'photos' ? x.parts[+m[2]]?.unit.idx ?? [] : []) : pl?.find((p) => p.id === key)?.idx ?? [];
     if (idx.length) go?.(idx);
@@ -845,7 +852,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
   type Tile = { key: string; pics: Pic[]; ratio: number };
   const [pv, setPv] = useState<{ r: number } | null>(null);       // a photo carried over the page from the bottom: its shape
   const [away, setAway] = useState<number | null>(null);         // ... and, when it was already on the page, its number: it is lifted off its old place
-  const ratioOf = (pics: Pic[]) => (pics.length > 1 ? 1 : shapeOf(pics[0]?.r));
+  const ratioOf = (pics: Pic[]) => (pics[0]?.pin ? pics[0].r ?? 1 : pics.length > 1 ? 1 : shapeOf(pics[0]?.r));   // a place keeps its own shape
   /* Where every photo goes: by default each recording's photos beside its paragraph; a photo that was moved beside the
      paragraph and line it was put at, or in a row between two paragraphs. skip: leave one out (the one held). */
   const assemble = (skip?: string, extra?: Record<string, Pos>) => {
@@ -857,10 +864,12 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
     const putBetween = (tl: Tile, at: Pos) => {
       const b = Math.max(0, Math.min(at.b ?? 0, paras.length));
       if (!betw.has(b)) betw.set(b, []);
-      betw.get(b)!.push({ ...tl, o: at.o ?? 0, w: at.w });
+      const pin = tl.pics[0]?.pin;
+      betw.get(b)!.push({ ...tl, o: at.o ?? 0, w: at.w ?? (pin ? pinSize(pin, W).w : undefined) });
     };
     const single = (tl: Tile, at: Pos) => {
-      const w = at.w ?? soloFor(tl.ratio, W).w;
+      const pin = tl.pics[0]?.pin;
+      const w = at.w ?? (pin ? pinSize(pin, W).w : soloFor(tl.ratio, W).w);
       singles.push({ key: tl.key, pics: tl.pics, w, h: w * tl.ratio, at });
     };
     sets.forEach((st, n) => {
@@ -889,8 +898,8 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       blocks.push({ spot: { key: `set${n}`, x: bx, w: cw, p: st.para, k, n: rowsN }, ch, tiles: stay.map((tl, i) => ({ key: tl.key, pics: tl.pics, r: shape[i] })) });
     });
     for (const pl of placed ?? []) {
-      if (pl.id === skip || pl.idx[0] === away) continue;
-      const pics = pl.idx.map((k) => photos[k]).filter(Boolean);
+      if (pl.id === skip || (pl.idx.length && pl.idx[0] === away)) continue;
+      const pics = pl.pin ? [{ pin: pl.pin, r: pinSize(pl.pin, W).r }] : pl.idx.map((k) => photos[k]).filter(Boolean);
       if (!pics.length) continue;
       const at = at0[pl.id] ?? { x: 0, y: 0 };
       const tile = { key: pl.id, pics, ratio: ratioOf(pics) };
@@ -902,12 +911,12 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       if (pa.b !== undefined) putBetween(tile, pa); else single(tile, pa);
     }
     /* the rows between paragraphs: up to three photos to a row, in their order */
-    const brow = new Map<number, { items: (Tile & { o: number; w?: number })[]; h: number; ws: number[]; x0: number }[]>();
+    const brow = new Map<number, { items: (Tile & { o: number; w?: number })[]; h: number; ws: number[]; hs: number[]; x0: number }[]>();
     const rowsAt: number[] = Array(paras.length + 1).fill(0);
     for (const [b, list] of betw) {
       list.sort((a, c) => a.o - c.o);
       const rs = [];
-      for (let i = 0; i < list.length; i += 3) { const items = list.slice(i, i + 3); rs.push({ items, ...rowOf(items.map((x) => ({ r: x.ratio, w: x.w })), W) }); }
+      for (let i = 0; i < list.length; i += 3) { const items = list.slice(i, i + 3); rs.push({ items, ...rowOf(items.map((x) => ({ r: x.ratio, w: x.w, own: !!x.pics[0]?.pin })), W) }); }
       brow.set(b, rs);
       rowsAt[b] = rs.reduce((a, r) => a + r.h, 0) + GT * (rs.length - 1) + gap;
     }
@@ -921,7 +930,7 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
       let yy = rowTops[b] ?? 0;
       for (const r of rs) {
         let xx = r.x0;
-        r.items.forEach((it, i) => { out[it.key] = { x: xx, y: yy, w: r.ws[i], h: r.h }; xx += r.ws[i] + GT; });
+        r.items.forEach((it, i) => { out[it.key] = { x: xx, y: yy + Math.round((r.h - r.hs[i]) / 2), w: r.ws[i], h: r.hs[i] }; xx += r.ws[i] + GT; });
         yy += r.h + GT;
       }
     }
@@ -1314,8 +1323,10 @@ export function Page({ items, photos, placed, moved, api, onEdge, onPreview, onR
         {lines.map(setLine)}
         {tiles.map((tl) => (
           <Movable key={tl.key} id={tl.key} slot={!!brects[tl.key]} pk={tl.pics.map((pc) => pc.file ?? pc.uri ?? pc.asset).join('|')} r={tl.r} z={tl.key === front ? 2 : 1} W={W} locked={locked || !!onChoose} block={scroll} grab={grab} move={move} drop={drop} open={onOpen ? openTile : undefined} two={two} shove={shove}>
-            {tl.pics.length > 1 ? <Fluid pics={tl.pics} />
+            {tl.pics[0]?.pin ? <PinTile pin={tl.pics[0].pin} w={tl.r.w} h={tl.r.h} />
+              : tl.pics.length > 1 ? <Fluid pics={tl.pics} />
               : <Image source={src(tl.pics[0])} contentFit="cover" style={[StyleSheet.absoluteFill, { borderRadius: 8 }]} />}
+            {tl.pics.length === 1 && tl.pics[0].video ? <VideoMark secs={tl.pics[0].video.secs} big={tl.r.w > 150} /> : null}
           </Movable>
         ))}
         {/* the gap's line: across the page between the two paragraphs, or, among photos already in a row there, between them */}

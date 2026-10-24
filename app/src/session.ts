@@ -1,7 +1,11 @@
+import type { Pin } from './places';
+
 /* What happened in a day: photos picked, groups made, and what was said. */
 /* file: the photo's path inside Documents, once it has been copied out of the picker's cache; r: its height over its width */
 /* orig: the photo as it was before marks or stickers were set into it, to go back to */
-export type Pic = { uri?: string; asset?: number; file?: string; r?: number; orig?: { uri?: string; asset?: number; file?: string; r?: number } };
+/* video: a video, whose picture (uri, file) is its first frame, shown wherever a photo would be, with a play mark */
+/* pin: not a photo at all but a place put on the page (it is drawn as a card or a chip, and moves like a photo) */
+export type Pic = { uri?: string; asset?: number; file?: string; r?: number; orig?: { uri?: string; asset?: number; file?: string; r?: number }; video?: { uri?: string; file?: string; secs?: number }; pin?: Pin };
 export type Unit = { idx: number[] };            // one photo, or a group of photos (indices into the picked list)
 /* spoken: the sentence as said ("one is the café…"); text: the same words without the number, used as the caption */
 export type Part = { unit: Unit; text: string; spoken?: string };
@@ -13,7 +17,8 @@ type Rec = { audio?: string; at?: number; secs?: number; g?: boolean; more?: { a
    A head with a day starts that day on a page that runs over several days; it stays when the page is laid out again */
 export type Said = ({ kind: 'talk'; text: string } & Rec) | ({ kind: 'photos'; parts: Part[]; paper?: boolean } & Rec) | { kind: 'head'; text: string; day?: string };
 /* placed: photos dragged from the tray onto the page; moved: where a photo on the page was dragged to, by its key */
-export type Placed = { id: string; idx: number[] };
+/* a place put on the page has no photos (idx is empty) and its pin instead */
+export type Placed = { id: string; idx: number[]; pin?: Pin };
 /* p, k: the paragraph a photo belongs to and the line it starts on; y is only for positions saved before that;
    w: the width it was pinched to */
 /* b, o: instead of beside a paragraph, in a row between two paragraphs (b: the paragraph it comes before, o: its order
@@ -55,6 +60,6 @@ export function removePhotos(d: Day, gone: number[]): Day {
     photos: d.photos.filter((_, i) => !drop.has(i)),
     groups: d.groups.map(re).filter((g) => g.length > 1),
     said: d.said.map((x) => (x.kind === 'photos' ? { ...x, parts: x.parts.map((p) => ({ ...p, unit: { idx: re(p.unit.idx) } })) } : x)),
-    placed: d.placed?.map((p) => ({ ...p, idx: re(p.idx) })).filter((p) => p.idx.length),
+    placed: d.placed?.map((p) => ({ ...p, idx: re(p.idx) })).filter((p) => p.idx.length || p.pin),
   };
 }

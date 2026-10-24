@@ -56,6 +56,18 @@ export function Badge({ text, mid }: { text: string; mid?: boolean }) {
   );
 }
 
+/* a video's mark, in the corner of its picture: a play triangle and how long it runs */
+const clock = (secs?: number) => (secs === undefined ? '' : `${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}`);
+export function VideoMark({ secs, big }: { secs?: number; big?: boolean }) {
+  const k = big ? 1.25 : 1;
+  return (
+    <View pointerEvents="none" style={[g.video, big && g.videoBig]}>
+      <Svg width={8 * k} height={9 * k} viewBox="0 0 8 9"><Path d="M1 0.8v7.4c0 .5.5.8.9.5l5.6-3.7c.4-.2.4-.8 0-1L1.9.3C1.5 0 1 .3 1 .8z" fill="#fff" /></Svg>
+      {secs !== undefined ? <Text style={[g.videoT, big && { fontSize: 12 }]}>{clock(secs)}</Text> : null}
+    </View>
+  );
+}
+
 export const label = (u: Unit) => (u.idx.length > 1 ? `${u.idx[0] + 1}–${u.idx[u.idx.length - 1] + 1}` : String(u.idx[0] + 1));
 
 /* Every photo of the day, as small square thumbnails, five to a row, numbered. A photo already on the page is dimmed and
@@ -129,6 +141,7 @@ function TrayTile({ u, photos, tile, used, select, picked, locked, onToggle, onO
       <View style={{ width: tile, height: tile, opacity: select && locked ? 0.4 : used ? 0.55 : 1 }}>
         {group ? <Stack pics={u.idx.map((i) => photos[i])} size={tile} r={r} />
           : <Image source={src(photos[u.idx[0]])} contentFit="cover" style={{ width: tile, height: tile, borderRadius: r }} />}
+        {!group && photos[u.idx[0]].video ? <VideoMark secs={photos[u.idx[0]].video?.secs} big={tile > 90} /> : null}
         <Badge text={label(u)} mid={tile > 90} />
         {picked ? ring : null}
         {picked ? <View style={[g.check, { backgroundColor: t.ink }]}><Svg width={16} height={16} viewBox="0 0 16 16"><Path d="M4.5 8.2l2.3 2.3 4.7-4.9" stroke={t.b} strokeWidth={1.8} fill="none" strokeLinecap="round" strokeLinejoin="round" /></Svg></View>
@@ -142,4 +155,7 @@ const g = StyleSheet.create({
   badge: { position: 'absolute', left: 3, bottom: 3, minWidth: 17, height: 17, paddingHorizontal: 4, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   badgeMid: { left: 7, bottom: 7, height: 22, minWidth: 22, paddingHorizontal: 7, borderRadius: 11 },
   check: { position: 'absolute', right: 4, top: 4, width: 16, height: 16, borderRadius: 8 },
+  video: { position: 'absolute', right: 3, bottom: 3, height: 17, paddingHorizontal: 5, borderRadius: 9, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.55)' },
+  videoBig: { right: 7, bottom: 7, height: 22, paddingHorizontal: 8, borderRadius: 11 },
+  videoT: { color: '#fff', fontSize: 10.5, fontVariant: ['tabular-nums'] },
 });
